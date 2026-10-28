@@ -17,7 +17,7 @@ export const assessmentSchema = z.object({
   symbol: z.string(),
   profitProbability: z.enum(['low', 'medium', 'high']).nullable().describe('Qualitative long-investment outlook for the next trading week, not a numeric probability'),
   classificationReason: z.string().min(20),
-  dataGapReason: z.string().min(20).nullable(),
+  dataGapReason: z.string().min(20).nullable().describe('Detailed reason if unclassified. MUST be null for classified stocks (low/medium/high). Only populate if profitProbability is null.'),
   outlookHorizon: z.literal('next_trading_week'),
   fundamentalRisk: z.number().min(0).max(100).nullable().describe('Comparative fundamental risk: 0 lowest, 100 highest; not a probability'),
   recoveryScore: z.number().min(0).max(100).nullable().describe('Comparative recovery conviction, not a probability'),
@@ -149,10 +149,20 @@ export function createResearcher(db: DatabaseClient, root: string, runId: string
       description: 'Submit the final auditable profit-outlook assessment. Correct validation errors, or submit a null category with an explicit data-gap reason. Never remove a shortlisted stock.',
       schema: assessmentSchema,
       func: async input => {
-        const assessment = assessmentSchema.parse(input);
-        validateAssessment(assessment, candidate, evidence.reads);
-        submitted = assessment;
-        return JSON.stringify({ accepted: true, symbol: candidate.symbol });
+        try {
+          const assessment = assessmentSchema.parse(input);
+          validateAssessment(assessment, candidate, evidence.reads);
+          submitted = assessment;
+          return JSON.stringify({ accepted: true, symbol: candidate.symbol });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return JSON.stringify({
+            accepted: false,
+            symbol: candidate.symbol,
+            error: message,
+            instruction: 'Validation failed. If profitProbability is set (low/medium/high), dataGapReason MUST be null. If there is an unresolved data gap preventing classification, set profitProbability to null and provide an explicit dataGapReason (min 20 chars). Please correct and call submit_stock_assessment again.',
+          });
+        }
       },
     });
     const runner = new DeepAgentRunner(db, {

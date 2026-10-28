@@ -25,7 +25,11 @@ export function publicationFile(root: string, runId: string): string {
 
 export function createPublisher(url: string, key: string, root: string, request: typeof fetch = fetch): Publisher {
   const client = createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: request },
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: request },
+    realtime: {
+      transport: (typeof WebSocket !== 'undefined' ? WebSocket : class DummyWebSocket {}) as any,
+    },
   });
   return async (results, runId) => {
     const file = publicationFile(root, runId);
