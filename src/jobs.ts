@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { BhavStore, screen } from './bhav.js';
+import { BhavStore, MissingBhavcopy, UnavailableHistory, screen } from './bhav.js';
 import { dateValue, todayIST } from './dates.js';
 import { atomicWrite, cleanupRun, initializeStorage, prune, readOptional } from './storage.js';
 import { selectStocks, refreshClassification, type RankedStock, type Researcher } from './research.js';
@@ -13,9 +13,11 @@ export interface Job {
   date: string;
   createdAt: string;
   updatedAt: string;
-  status: 'queued' | 'running' | 'publishing' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'publishing' | 'completed' | 'skipped' | 'failed';
   phase: string;
   error?: string;
+  skippedReason?: string;
+  baselineDate?: string;
   downloads?: number;
   missingDates?: string[];
   settings: ScreeningConfig;
@@ -124,6 +126,7 @@ export class Jobs {
       await this.save(job);
       await prune(this.deps.root, todayIST());
       const history = await store.history(job.date, job.settings);
+      job.baselineDate = history.baseline;
       if (store.missingDates.length) {
         console.warn(JSON.stringify({
           event: 'missing_archive_dates', runId: job.id, dates: store.missingDates,
@@ -165,12 +168,20 @@ export class Jobs {
       await this.save(job);
       console.log(JSON.stringify({ event: 'run_completed', runId: job.id, gainers: results.gainers.length, losers: results.losers.length }));
     } catch (error) {
-      job.status = 'failed';
-      job.error = error instanceof Error ? error.message : String(error);
       job.downloads = store.downloads;
       job.missingDates = store.missingDates;
-      await this.save(job);
-      console.error(JSON.stringify({ event: 'run_failed', runId: job.id, phase: job.phase, error: job.error }));
+      if (error instanceof MissingBhavcopy || error instanceof UnavailableHistory) {
+        job.status = 'skipped';
+        job.phase = 'skipped';
+        job.skippedReason = error.message;
+        await this.save(job);
+        console.info(JSON.stringify({ event: 'run_skipped', runId: job.id, date: job.date, reason: job.skippedReason }));
+      } else {
+        job.status = 'failed';
+        job.error = error instanceof Error ? error.message : String(error);
+        await this.save(job);
+        console.error(JSON.stringify({ event: 'run_failed', runId: job.id, phase: job.phase, error: job.error }));
+      }
     } finally {
       await prune(this.deps.root, todayIST());
     }
