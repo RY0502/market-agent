@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { BhavStore, MissingBhavcopy, archiveUrl, parseBhav, screen, shortlist } from '../src/bhav.js';
+import { BhavStore, MissingBhavcopy, UnavailableHistory, archiveUrl, parseBhav, screen, shortlist } from '../src/bhav.js';
 import { loadScreeningConfig } from '../src/screening.js';
 import { addDays, dateValue, monthsBefore, todayIST } from '../src/dates.js';
 import { initializeStorage, prune } from '../src/storage.js';
@@ -116,7 +116,9 @@ test('history filters latest price only, reuses raw cache and probes weekend bas
     };
     const store = new BhavStore(root, request);
     const history = await store.history('2026-03-31', loadScreeningConfig({}));
-    assert.equal(history.baseline, '2026-02-27');
+    assert.equal(history.baseline, '2026-03-02');
+    assert.ok(store.missingDates.includes('2026-02-28'));
+    assert.ok(store.missingDates.includes('2026-03-01'));
     assert.equal(history.current.length, 1);
     assert.equal(history.days[0]![0]!.close, 150);
     assert.ok(history.days.every(day => day.length === 1));
@@ -143,6 +145,70 @@ test('strict requested day, access failure, corrupt ZIP and download cap', async
     await assert.rejects(store.load('2026-10-26'), /31 bhavcopy/);
     assert.equal(calls, 0);
     assert.equal(store.downloads, 31);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('baseline advances over holidays; history omits gaps and includes special weekend sessions', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'nse-holidays-'));
+  try {
+    await initializeStorage(root);
+    const requested: string[] = [];
+    const request: typeof fetch = async input => {
+      const compact = /_(\d{8})_F_/.exec(String(input))![1]!;
+      const day = `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6)}`;
+      requested.push(day);
+      const weekday = dateValue(day).getUTCDay();
+      const specialSession = day === '2026-10-03';
+      if (['2026-09-28', '2026-09-29', '2026-10-02'].includes(day) ||
+        (!specialSession && (weekday === 0 || weekday === 6))) return new Response('', { status: 404 });
+      return zipResponse(csv(day, [equity({
+        date: day, close: day === '2026-10-28' ? 500 : 350,
+        high: day === '2026-10-28' ? 520 : 400, low: 300,
+        volume: day === '2026-10-28' ? 200 : 100,
+      })]));
+    };
+    const store = new BhavStore(root, request);
+    const history = await store.history('2026-10-28', loadScreeningConfig({}));
+    assert.equal(history.baseline, '2026-09-30');
+    assert.ok(history.days.some(day => day[0]?.date === '2026-10-03'), 'Do not assume all weekends are closed');
+    assert.ok(!history.days.some(day => day[0]?.date === '2026-10-02'));
+    assert.ok(requested.every(day => day >= '2026-09-28'));
+    assert.equal(new Set(requested).size, requested.length, 'Missing dates must not be probed twice');
+    assert.ok(store.missingDates.includes('2026-10-02'));
+    const candidates = screen(history, loadScreeningConfig({}));
+    assert.equal(candidates[0]!.change, 120);
+    assert.equal(candidates[0]!.baselineDate, '2026-09-30');
+    assert.equal(candidates[0]!.observations, history.days.length);
+    assert.equal(candidates[0]!.averageVolume, 100);
+    assert.equal(candidates[0]!.volumeRatio, 2);
+    assert.equal(store.downloads, history.days.length);
+    assert.ok(store.downloads <= 31);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('history never uses the current day as its baseline when no older file exists', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'nse-no-history-'));
+  try {
+    await initializeStorage(root);
+    const store = new BhavStore(root, async input => String(input).includes('20261028')
+      ? zipResponse(csv('2026-10-28')) : new Response('', { status: 404 }));
+    await assert.rejects(store.history('2026-10-28', loadScreeningConfig({})), UnavailableHistory);
+    assert.equal(store.downloads, 1);
+    assert.equal(store.missingDates.length, 30);
+    assert.deepEqual(await readdir(path.join(root, 'reduced')), []);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('historical access errors and rate limits fail explicitly instead of masquerading as holidays', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'nse-history-error-'));
+  try {
+    await initializeStorage(root);
+    for (const status of [403, 429, 503]) {
+      const store = new BhavStore(root, async input => String(input).includes('20261028')
+        ? zipResponse(csv('2026-10-28')) : new Response('', { status }));
+      await assert.rejects(store.history('2026-10-28', loadScreeningConfig({})), new RegExp(`HTTP ${status}`));
+      assert.deepEqual(store.missingDates, []);
+    }
   } finally { await rm(root, { recursive: true }); }
 });
 
