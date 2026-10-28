@@ -1,0 +1,30 @@
+{
+  "name": "nse-research-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "build": "tsc",
+    "start": "node dist/src/server.js",
+    "test": "tsx --test test/*.test.ts",
+    "test:bhav": "tsx src/verify-bhav.ts",
+    "db:setup": "tsx src/setup.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.0.0",
+    "@supabase/supabase-js": "^2.57.0",
+    "csv-parse": "^6.1.0",
+    "dotenv": "^16.4.0",
+    "fflate": "^0.8.2",
+    "freetier-deepagent-framework": "github:RY0502/freetier-deepagent-framework#86ec4a5576570e82064d62141e809c10df2894f8",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
