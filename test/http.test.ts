@@ -8,7 +8,7 @@ import { Jobs } from '../src/jobs.js';
 import { createHttpServer } from '../src/http.js';
 import { addDays, monthsBefore, todayIST } from '../src/dates.js';
 import { initializeStorage } from '../src/storage.js';
-import { csv, equity, research } from './helpers.js';
+import { csv, equity, research, zipResponse } from './helpers.js';
 import { loadScreeningConfig } from '../src/screening.js';
 import { publicationFile } from '../src/publish.js';
 
@@ -79,7 +79,8 @@ test('unauthenticated HTTP trigger runs both groups, persists status, rejects ov
   }
 });
 
-test('missing requested-day bhavcopy fails without research or publication', async () => {
+for (const date of ['2026-10-25', '2026-10-20']) {
+test(`missing requested-day bhavcopy (${date}) skips without research or Supabase operations`, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'nse-missing-'));
   let researched = false;
   let published = false;
@@ -91,14 +92,40 @@ test('missing requested-day bhavcopy fails without research or publication', asy
   });
   try {
     await jobs.initialize();
-    const job = await jobs.start();
+    const job = await jobs.start(date);
     await jobs.wait();
     const result = await jobs.get(job.id);
-    assert.equal(result!.status, 'failed');
-    assert.match(result!.error!, /No NSE bhavcopy/);
+    assert.equal(result!.status, 'skipped');
+    assert.match(result!.skippedReason!, /No NSE bhavcopy/);
+    assert.equal(result!.error, undefined);
+    assert.deepEqual(result!.missingDates, [job.date]);
     assert.equal(researched, false);
     assert.equal(published, false);
     assert.equal((await jobs.get(job.id))!.id, job.id);
+  } finally { await rm(root, { recursive: true }); }
+});
+}
+
+test('a run with no available historical baseline skips without touching Supabase', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'nse-skip-history-'));
+  let researched = false;
+  let published = false;
+  const jobs = new Jobs({
+    root, screeningConfig: () => loadScreeningConfig({}),
+    request: async input => String(input).includes('20261028')
+      ? zipResponse(csv('2026-10-28')) : new Response('', { status: 404 }),
+    researcher: () => async c => { researched = true; return research(c.symbol); },
+    publish: async () => { published = true; },
+  });
+  try {
+    await jobs.initialize();
+    const job = await jobs.start('2026-10-28');
+    await jobs.wait();
+    const result = await jobs.get(job.id);
+    assert.equal(result!.status, 'skipped');
+    assert.match(result!.skippedReason!, /No historical bhavcopy/);
+    assert.equal(researched, false);
+    assert.equal(published, false);
   } finally { await rm(root, { recursive: true }); }
 });
 
