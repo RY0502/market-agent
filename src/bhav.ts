@@ -38,6 +38,7 @@ export interface Candidate {
 }
 
 export class MissingBhavcopy extends Error {}
+export class UnavailableHistory extends Error {}
 
 export function archiveUrl(date: string): string {
   dateValue(date);
@@ -116,7 +117,10 @@ export class BhavStore {
       headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/zip', Referer: 'https://www.nseindia.com/' },
       signal: AbortSignal.timeout(45_000),
     });
-    if (response.status === 404) throw new MissingBhavcopy(`No NSE bhavcopy for ${date}`);
+    if (response.status === 404) {
+      if (!this.missingDates.includes(date)) this.missingDates.push(date);
+      throw new MissingBhavcopy(`No NSE bhavcopy for ${date}`);
+    }
     if (!response.ok) throw new Error(`NSE download failed for ${date}: HTTP ${response.status}`);
     this.downloads++;
     const buffer = new Uint8Array(await response.arrayBuffer());
@@ -137,18 +141,16 @@ export class BhavStore {
     const target = monthsBefore(date, 1);
     let baseline: string | undefined;
     let baseRows: Equity[] = [];
-    for (let offset = 0; offset <= 10; offset++) {
-      const day = addDays(target, -offset);
+    for (let day = target; day < date; day = addDays(day, 1)) {
       try {
         baseRows = await this.load(day);
         baseline = day;
         break;
       } catch (error) {
         if (!(error instanceof MissingBhavcopy)) throw error;
-        this.missingDates.push(day);
       }
     }
-    if (!baseline) throw new Error(`No baseline bhavcopy within 10 days on or before ${target}`);
+    if (!baseline) throw new UnavailableHistory(`No historical bhavcopy available on or after ${target} and before ${date}; monthly comparison skipped`);
     const days = [baseRows.filter(row => ids.has(row.isin))];
     for (let day = addDays(baseline, 1); day < date; day = addDays(day, 1)) {
       // Weekends can contain special NSE sessions, so probe them too.
@@ -156,7 +158,6 @@ export class BhavStore {
         days.push((await this.load(day)).filter(row => ids.has(row.isin)));
       } catch (error) {
         if (!(error instanceof MissingBhavcopy)) throw error;
-        this.missingDates.push(day);
       }
     }
     days.push(current);
