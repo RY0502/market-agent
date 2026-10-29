@@ -6,7 +6,7 @@ import { parse } from 'csv-parse/sync';
 import { BhavStore, screen, shortlist } from './bhav.js';
 import { dateValue, todayIST } from './dates.js';
 import { atomicWrite, initializeStorage } from './storage.js';
-import { loadScreeningConfig } from './screening.js';
+import { ACTIVE_GROUPS, loadScreeningConfig } from './screening.js';
 
 const [baselineDate, asOfDate] = process.argv.slice(2);
 if (!baselineDate || !asOfDate) {
@@ -22,7 +22,7 @@ const store = new BhavStore(root);
 const baseline = await store.load(baselineDate);
 const latest = await store.load(asOfDate);
 const settings = loadScreeningConfig();
-const current = latest.filter(row => Object.values(settings).some(rule => row.close >= rule.minPrice && row.close <= rule.maxPrice));
+const current = latest.filter(row => ACTIVE_GROUPS.some(group => row.close >= settings[group].minPrice && row.close <= settings[group].maxPrice));
 const ids = new Set(current.map(row => row.isin));
 const history = { baseline: baselineDate, current, days: [baseline.filter(row => ids.has(row.isin)), current] };
 const candidates = screen(history, settings);
@@ -41,8 +41,8 @@ const traded = (rows: Record<string, string>[]) => rows.filter(row =>
   row.SctySrs === 'EQ' && (!row.FinInstrmTp || row.FinInstrmTp === 'STK') && Number(row.TtlTradgVol) > 0);
 assert.equal(baseline.length, traded(rawBaseline).length);
 assert.equal(latest.length, traded(rawLatest).length);
-const expectedCurrent = traded(rawLatest).filter(row => Object.values(settings).some(rule =>
-  Number(row.ClsPric) >= rule.minPrice && Number(row.ClsPric) <= rule.maxPrice));
+const expectedCurrent = traded(rawLatest).filter(row => ACTIVE_GROUPS.some(group =>
+  Number(row.ClsPric) >= settings[group].minPrice && Number(row.ClsPric) <= settings[group].maxPrice));
 assert.deepEqual(current.map(row => row.isin).sort(), expectedCurrent.map(row => row.ISIN).sort());
 
 const rawBaseByIsin = new Map(traded(rawBaseline).map(row => [row.ISIN, row]));
@@ -51,6 +51,7 @@ for (const row of expectedCurrent) {
   const base = rawBaseByIsin.get(row.ISIN);
   if (!base) continue;
   for (const [group, column, direction] of [['gainers', 'HghPric', 1], ['losers', 'LwPric', -1]] as const) {
+    if (!ACTIVE_GROUPS.includes(group)) continue;
     const rule = settings[group];
     if (Number(row.ClsPric) < rule.minPrice || Number(row.ClsPric) > rule.maxPrice) continue;
     const baselinePrice = Number(base[column]);
@@ -66,9 +67,9 @@ for (const row of expectedCurrent) {
 }
 assert.deepEqual(candidates.map(({ symbol, isin, group, threshold, price, change, changePercent }) =>
   ({ symbol, isin, group, threshold, price, change, changePercent })), expected);
-for (const group of ['gainers', 'losers'] as const) {
+for (const group of ACTIVE_GROUPS) {
   const expectedTop = expected.filter(row => row.group === group)
-    .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent) ||
+    .sort((a, b) => Math.abs(b.change) - Math.abs(a.change) ||
       a.symbol.localeCompare(b.symbol) || a.isin.localeCompare(b.isin)).slice(0, 25);
   assert.deepEqual(selected[group].map(row => row.isin), expectedTop.map(row => row.isin));
 }
@@ -118,7 +119,7 @@ const report = {
   },
   checks: {
     rawCsvCrossCheck: 'passed', reducedJsonRoundTrip: 'passed',
-    cachedReadsWithoutNetwork: 'passed', cacheDownloads: cached.downloads, top25PercentageOrder: 'passed',
+    cachedReadsWithoutNetwork: 'passed', cacheDownloads: cached.downloads, top25RupeeOrder: 'passed',
   },
   samples: { gainers: sample('gainers'), losers: sample('losers') },
   reducedFile,

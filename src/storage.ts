@@ -26,7 +26,7 @@ export async function readOptional(file: string): Promise<Buffer | undefined> {
 }
 
 export async function initializeStorage(root: string): Promise<void> {
-  await Promise.all(['bhav', 'reduced', 'runs'].map(dir => mkdir(path.join(root, dir), { recursive: true })));
+  await Promise.all(['bhav', 'nse', 'reduced', 'runs', 'research-cache'].map(dir => mkdir(path.join(root, dir), { recursive: true })));
 }
 
 export async function removeOptional(file: string): Promise<void> {
@@ -46,9 +46,9 @@ export async function cleanupRun(root: string, date: string, runId: string): Pro
 
 export async function prune(root: string, today: string): Promise<void> {
   const cutoff = monthsBefore(today, 2);
-  for (const dir of ['bhav']) {
+  for (const dir of ['bhav', 'nse']) {
     for (const entry of await readdir(path.join(root, dir), { withFileTypes: true })) {
-      const match = /^(\d{4}-\d{2}-\d{2})(?:\.[a-zA-Z0-9-]+)*\.(?:csv|json|jsonl|tmp)$/.exec(entry.name);
+      const match = /^(\d{4}-\d{2}-\d{2})(?:\.[a-zA-Z0-9-]+)*\.(?:csv|zip|json|jsonl|tmp)$/.exec(entry.name);
       if (entry.isFile() && match?.[1] && match[1] < cutoff) {
         await unlink(path.join(root, dir, entry.name));
       }

@@ -17,6 +17,36 @@ test('calendar-month arithmetic, leap years and IST date', () => {
   assert.throws(() => dateValue('2026-02-30'));
 });
 
+test('configured day duration changes the baseline and qualifying movement while reusing downloaded history', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'day-window-'));
+  const date = '2026-10-26';
+  const requests: string[] = [];
+  const store = new BhavStore(root, async input => {
+    const match = String(input).match(/_(\d{8})_F_/)!;
+    const raw = match[1]!;
+    const day = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+    requests.push(day);
+    return zipResponse(csv(day, [equity({
+      date: day, close: day === date ? 500 : 350,
+      high: day === date ? 520 : day === addDays(date, -30) ? 450 : 400,
+      low: 300,
+    })]));
+  });
+  try {
+    await initializeStorage(root);
+    const week = loadScreeningConfig({ LOOKBACK_DAYS: '7' });
+    const short = await store.history(date, week);
+    assert.equal(short.baseline, addDays(date, -7));
+    assert.equal(requests.length, 8);
+    assert.deepEqual(screen(short, week).map(c => c.change), [120]);
+    const defaults = loadScreeningConfig({});
+    const long = await store.history(date, defaults);
+    assert.equal(long.baseline, addDays(date, -30));
+    assert.equal(requests.length, 31);
+    assert.deepEqual(screen(long, defaults), []);
+  } finally { await rm(root, { recursive: true }); }
+});
+
 test('official modern and legacy URL conventions', () => {
   assert.equal(archiveUrl('2026-10-26'), 'https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261026_F_0000.csv.zip');
   assert.equal(archiveUrl('2024-01-02'), 'https://nsearchives.nseindia.com/content/historical/EQUITIES/2024/JAN/cm02JAN2024bhav.csv.zip');
@@ -49,11 +79,10 @@ test('endpoint HIGH/LOW deltas, exact thresholds, percent denominator and ISIN c
     equity({ symbol: 'OTHER', isin: 'INE000B01001', high: 600, low: 550, close: 570 }),
   ];
   const found = screen({ current, baseline: '2026-09-25', days: [base, current] }, loadScreeningConfig({}));
-  assert.equal(found.length, 2);
+  assert.equal(found.length, 1);
   assert.deepEqual(found.map(c => [c.symbol, c.group, c.threshold, c.change]),
-    [['EXAMPLE', 'gainers', 100, 100], ['EXAMPLE', 'losers', 100, -100]]);
+    [['EXAMPLE', 'gainers', 100, 100]]);
   assert.equal(found[0]!.changePercent, 25);
-  assert.equal(found[1]!.changePercent, -100 / 300 * 100);
   assert.equal(found[0]!.volumeRatio, 1);
 });
 
@@ -77,7 +106,7 @@ test('separate price ranges and configurable thresholds apply per group, with no
     const base = [equity({ date: '2026-09-25', close: 1700, high: 1800, low: 1600 })];
     return screen({ current, baseline: '2026-09-25', days: [base, current] }, rules);
   };
-  assert.deepEqual(make(1500, 1925.25, 1500).map(c => [c.group, c.threshold]), [['gainers', 125.25], ['losers', 75.5]]);
+  assert.deepEqual(make(1500, 1925.25, 1500).map(c => [c.group, c.threshold]), [['gainers', 125.25]]);
   assert.deepEqual(make(1600, 1925.25, 1500).map(c => c.group), ['gainers']);
   assert.equal(make(1550, 1925.24, 1524.51, {
     ...settings, losers: { ...settings.losers, maxPrice: 1600 },
@@ -87,9 +116,14 @@ test('separate price ranges and configurable thresholds apply per group, with no
 test('screening env validates values and both range bounds', () => {
   const defaults = loadScreeningConfig({});
   assert.deepEqual(defaults, {
+    lookbackDays: 30,
     gainers: { threshold: 100, minPrice: 200, maxPrice: 2000 },
     losers: { threshold: 100, minPrice: 200, maxPrice: 1500 },
   });
+  assert.equal(loadScreeningConfig({ LOOKBACK_DAYS: '10' }).lookbackDays, 10);
+  for (const invalid of ['0', '-1', '1.5', '', 'NaN']) {
+    assert.throws(() => loadScreeningConfig({ LOOKBACK_DAYS: invalid }));
+  }
   for (const invalid of ['0', '-1', '', 'NaN', 'Infinity', '0.001']) {
     assert.throws(() => loadScreeningConfig({ GAINERS_INCREASE_RS: invalid }));
   }
@@ -117,7 +151,7 @@ test('history filters latest price only, reuses raw cache and probes weekend bas
     const store = new BhavStore(root, request);
     const history = await store.history('2026-03-31', loadScreeningConfig({}));
     assert.equal(history.baseline, '2026-03-02');
-    assert.ok(store.missingDates.includes('2026-02-28'));
+    assert.ok(!store.missingDates.includes('2026-02-28'), '30 days before March 31 is March 1, not February 28');
     assert.ok(store.missingDates.includes('2026-03-01'));
     assert.equal(history.current.length, 1);
     assert.equal(history.days[0]![0]!.close, 150);
@@ -239,7 +273,11 @@ test('retention removes only recognized files older than two calendar months', a
     await initializeStorage(root);
     await Promise.all(['2026-08-26.csv', '2026-08-26.csv.abcd.tmp', '2026-08-27.csv', 'notes.txt'].map(file =>
       writeFile(path.join(root, 'bhav', file), 'test')));
+    await Promise.all(['2026-08-26.pe.csv', '2026-08-26.pr.zip', '2026-08-26.pe.csv.abcd.tmp',
+      '2026-08-27.pe.csv', '2026-08-27.pr.zip', 'notes.txt'].map(file =>
+      writeFile(path.join(root, 'nse', file), 'test')));
     await prune(root, '2026-10-27');
     assert.deepEqual((await readdir(path.join(root, 'bhav'))).sort(), ['2026-08-27.csv', 'notes.txt']);
+    assert.deepEqual((await readdir(path.join(root, 'nse'))).sort(), ['2026-08-27.pe.csv', '2026-08-27.pr.zip', 'notes.txt']);
   } finally { await rm(root, { recursive: true }); }
 });

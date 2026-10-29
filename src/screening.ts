@@ -7,6 +7,7 @@ const rupees = z.coerce.number().finite().positive().refine(
   'Use amounts with at most two decimal places',
 );
 const envSchema = z.object({
+  LOOKBACK_DAYS: z.coerce.number().int().safe().positive().default(30),
   GAINERS_INCREASE_RS: rupees.default(100),
   LOSERS_DECREASE_RS: rupees.default(100),
   GAINERS_MIN_PRICE: rupees.default(200),
@@ -27,10 +28,12 @@ export interface ScreeningRule {
   maxPrice: number;
 }
 export interface ScreeningConfig {
+  lookbackDays: number;
   gainers: ScreeningRule;
   losers: ScreeningRule;
 }
 export const SHORTLIST_SIZE = 25;
+export const ACTIVE_GROUPS: readonly ('gainers' | 'losers')[] = ['gainers' /*, 'losers' */];
 
 export function loadScreeningConfig(env?: Record<string, string | undefined>): ScreeningConfig {
   if (!env) {
@@ -40,11 +43,12 @@ export function loadScreeningConfig(env?: Record<string, string | undefined>): S
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
     }
-    // Only the six screening fields are consumed; reload .env for each new run.
+    // Reload screening settings for each new run.
     env = { ...process.env, ...file };
   }
   const parsed = envSchema.parse(env);
   return {
+    lookbackDays: parsed.LOOKBACK_DAYS,
     gainers: { threshold: parsed.GAINERS_INCREASE_RS, minPrice: parsed.GAINERS_MIN_PRICE, maxPrice: parsed.GAINERS_MAX_PRICE },
     losers: { threshold: parsed.LOSERS_DECREASE_RS, minPrice: parsed.LOSERS_MIN_PRICE, maxPrice: parsed.LOSERS_MAX_PRICE },
   };

@@ -1,0 +1,14 @@
+{
+	"$schema": "../node_modules/wrangler/config-schema.json",
+	"name": "stock-reports",
+	"main": "index.ts",
+	"compatibility_date": "2025-09-01",
+	"kv_namespaces": [
+		{
+			"binding": "REPORTS",
+			// Replace with the ID from `npx wrangler kv namespace create REPORTS`.
+			"id": "b1be2d75720f44ffb7933ef992d86954",
+			"remote": true
+		}
+	]
+}

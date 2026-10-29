@@ -10,7 +10,8 @@
     "start": "node dist/src/server.js",
     "test": "tsx --test test/*.test.ts",
     "test:bhav": "tsx src/verify-bhav.ts",
-    "db:setup": "tsx src/setup.ts"
+    "db:setup": "tsx src/setup.ts",
+    "reports:setup": "tsx src/setup-reports.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.0.0",
@@ -25,6 +26,7 @@
     "@electric-sql/pglite": "^0.3.14",
     "@types/node": "^22.0.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "wrangler": "^4.0.0"
   }
 }

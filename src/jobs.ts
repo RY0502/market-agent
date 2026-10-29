@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { BhavStore, MissingBhavcopy, UnavailableHistory, screen } from './bhav.js';
+import { BhavStore, MissingBhavcopy, UnavailableHistory, screen, shortlist, type Candidate } from './bhav.js';
 import { dateValue, todayIST } from './dates.js';
 import { atomicWrite, cleanupRun, initializeStorage, prune, readOptional } from './storage.js';
-import { selectStocks, refreshClassification, type RankedStock, type Researcher } from './research.js';
+import { selectStocks, refreshClassification, type RankedStock, type Researcher, type ResearchWarning } from './research.js';
 import type { Publisher } from './publish.js';
 import { loadScreeningConfig, type ScreeningConfig } from './screening.js';
+import { withResearchCache } from './research-cache.js';
+import type { Reporter, ReportReference } from './reports.js';
+import type { ResearchResult } from './research.js';
+import { NseFundamentalsStore } from './nse-fundamentals.js';
 
 export interface Job {
   id: string;
@@ -19,9 +23,19 @@ export interface Job {
   skippedReason?: string;
   baselineDate?: string;
   downloads?: number;
+  nseDownloads?: { pe: number; pr: number };
   missingDates?: string[];
   settings: ScreeningConfig;
   candidates?: { gainers: number; losers: number };
+  screened?: Candidate[];
+  stockOutcomes?: {
+    symbol: string; isin: string; price: number; priceAsOf: string;
+    profitProbability: 'low' | 'medium' | 'high' | null;
+    classificationReason: string; dataGapReason: string | null;
+    warnings: ResearchWarning[]; failure?: { name: string; message: string };
+    group: Candidate['group']; cache?: ResearchResult['cache']; report?: ReportReference;
+    nse?: Candidate['nse'];
+  }[];
   results?: { gainers: RankedStock[]; losers: RankedStock[] };
   inserted?: { gainers: number; losers: number };
 }
@@ -31,8 +45,10 @@ export interface JobDependencies {
   root: string;
   researcher: (runId: string) => Researcher;
   publish: Publisher;
+  report: Reporter;
   request?: typeof fetch;
   screeningConfig?: () => ScreeningConfig;
+  resetFrameworkState: () => Promise<void>;
 }
 
 export class Jobs {
@@ -120,8 +136,13 @@ export class Jobs {
 
   private async execute(job: Job): Promise<void> {
     const store = new BhavStore(this.deps.root, this.deps.request);
+    const fundamentals = new NseFundamentalsStore(this.deps.root, this.deps.request);
     try {
       job.status = 'running';
+      job.phase = 'resetting_framework';
+      await this.save(job);
+      await this.deps.resetFrameworkState();
+      console.info(JSON.stringify({ event: 'framework_state_cleared', runId: job.id }));
       job.phase = 'downloading';
       await this.save(job);
       await prune(this.deps.root, todayIST());
@@ -134,26 +155,72 @@ export class Jobs {
         }));
       }
       const candidates = screen(history, job.settings);
+      job.screened = candidates;
+      job.stockOutcomes = [];
       job.downloads = store.downloads;
       job.missingDates = store.missingDates;
       job.candidates = {
         gainers: candidates.filter(c => c.group === 'gainers').length,
         losers: candidates.filter(c => c.group === 'losers').length,
       };
+      job.phase = 'loading_nse_fundamentals';
+      await this.save(job);
+      const selected = shortlist(candidates);
+      const selectedCandidates = [...selected.gainers, ...selected.losers];
+      const contexts = await fundamentals.contexts(history, selectedCandidates);
+      for (const candidate of selectedCandidates) candidate.nse = contexts.get(candidate.isin);
+      job.nseDownloads = fundamentals.downloads;
       job.phase = 'researching';
       await this.save(job);
-      const results = await selectStocks(candidates, this.deps.researcher(job.id), async (candidate, research) => {
+      const researcher = withResearchCache(
+        this.deps.root, job.settings.lookbackDays, job.id, this.deps.researcher(job.id),
+      );
+      const results = await selectStocks(candidates, researcher, async (candidate, research) => {
         console.log(JSON.stringify({
           event: 'stock_assessment', runId: job.id, symbol: candidate.symbol,
           group: candidate.group, profitProbability: research.assessment.profitProbability,
           reasons: research.assessment.reasons, risks: research.assessment.risks,
           classificationReason: research.assessment.classificationReason, dataGapReason: research.assessment.dataGapReason,
+          warnings: research.assessment.warnings ?? [], failure: research.failure,
+          cache: research.cache,
         }));
-      });
+        job.stockOutcomes!.push({
+          symbol: candidate.symbol, isin: candidate.isin, price: candidate.price, priceAsOf: candidate.asOfDate,
+          profitProbability: research.assessment.profitProbability,
+          classificationReason: research.assessment.classificationReason, dataGapReason: research.assessment.dataGapReason,
+          warnings: research.assessment.warnings ?? [], failure: research.failure,
+          group: candidate.group, cache: research.cache, nse: candidate.nse,
+        });
+        await this.save(job);
+      }, job.id);
       for (const stock of [...results.gainers, ...results.losers]) {
-        refreshClassification(stock);
+        refreshClassification(stock, Date.now(), job.id);
+      }
+      for (const outcome of job.stockOutcomes) {
+        const stock = [...results.gainers, ...results.losers].find(stock =>
+          stock.candidate.isin === outcome.isin && stock.candidate.group === outcome.group);
+        if (stock) outcome.warnings = stock.research.assessment.warnings ?? [];
       }
       job.results = results;
+      job.phase = 'reporting';
+      await this.save(job);
+      const stocks = [...results.gainers, ...results.losers];
+      const requestedPoints = Math.min(5, job.settings.lookbackDays);
+      const prices = await store.chartPrices(history, stocks.map(stock => stock.candidate), requestedPoints);
+      job.downloads = store.downloads;
+      job.missingDates = store.missingDates;
+      for (const stock of stocks) {
+        const points = prices.get(stock.candidate.isin) ?? [];
+        if (points.length < requestedPoints) console.warn(JSON.stringify({
+          event: 'report_history_incomplete', runId: job.id, symbol: stock.candidate.symbol,
+          requested: requestedPoints, available: points.length,
+        }));
+        stock.report = await this.deps.report(stock, job.id, points, requestedPoints);
+        const outcome = job.stockOutcomes.find(outcome =>
+          outcome.isin === stock.candidate.isin && outcome.group === stock.candidate.group);
+        if (outcome) outcome.report = stock.report;
+        await this.save(job);
+      }
       job.status = 'publishing';
       job.phase = 'publishing';
       await this.save(job);
@@ -166,8 +233,13 @@ export class Jobs {
       await cleanupRun(this.deps.root, job.date, job.id);
       job.phase = 'completed';
       await this.save(job);
-      console.log(JSON.stringify({ event: 'run_completed', runId: job.id, gainers: results.gainers.length, losers: results.losers.length }));
+      console.log(JSON.stringify({
+        event: 'run_completed', runId: job.id, gainers: results.gainers.length, losers: results.losers.length,
+        unsure: job.stockOutcomes.filter(outcome => outcome.profitProbability === null).length,
+        researchFailures: job.stockOutcomes.filter(outcome => outcome.failure).length,
+      }));
     } catch (error) {
+      job.nseDownloads = fundamentals.downloads;
       job.downloads = store.downloads;
       job.missingDates = store.missingDates;
       if (error instanceof MissingBhavcopy || error instanceof UnavailableHistory) {

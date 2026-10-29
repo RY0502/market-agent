@@ -22,13 +22,18 @@ for (const populated of [false, true]) {
       const sql = await readFile(new URL('../supabase/migrations/001_profit_probability.sql', import.meta.url), 'utf8');
       await db.exec(sql);
       await db.exec(sql);
+      const reportsSql = await readFile(new URL('../supabase/migrations/002_report_url.sql', import.meta.url), 'utf8');
+      await db.exec(reportsSql);
+      await db.exec(reportsSql);
       for (const table of ['top_gainers', 'top_losers']) {
         const columns = await db.query<{ column_name: string }>(
           'select column_name from information_schema.columns where table_schema = $1 and table_name = $2 order by column_name',
           ['public', table],
         );
         assert.deepEqual(columns.rows.map(row => row.column_name),
-          ['change', 'change_percent', 'id', 'name', 'price', 'profit_probability', 'updated_at']);
+          ['change', 'change_percent', 'id', 'name', 'price', 'profit_probability', 'report_url', 'updated_at']);
+        assert.equal((await db.query(`select * from public.${table} where report_url is not null`)).rows.length, 0);
+        await db.exec(`update public.${table} set report_url = 'https://reports.example.org/legacy.html'`);
       }
       assert.equal((await db.query("select * from information_schema.tables where table_name = 'stock_research_publications'")).rows.length, 0);
       assert.equal((await db.query("select proname from pg_proc where proname = 'publish_stock_research'")).rows.length, 0);

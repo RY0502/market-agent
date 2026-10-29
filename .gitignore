@@ -4,3 +4,6 @@ data/
 .env
 .idea/
 *.log
+.env.local
+.dev.vars
+.wrangler/

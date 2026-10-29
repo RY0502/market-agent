@@ -1,0 +1,33 @@
+{
+  "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+  "toolCall": {
+    "name": "submit_stock_assessment",
+    "args": {
+      "sectorPe": "None",
+      "earningsGrowthPercent": "None",
+      "financialPeriod": "",
+      "quoteAsOf": null,
+      "pe": "None",
+      "outlookHorizon": "next_trading_week",
+      "recoveryScore": null,
+      "fundamentalRisk": null,
+      "marketCapCrore": "None",
+      "profitProbability": null,
+      "livePrice": null,
+      "quoteTimestampText": null,
+      "reasons": ["Available research is insufficient for a supported outlook."],
+      "debtToEquity": "None",
+      "classificationReason": "Unclassified because current quote evidence could not be verified.",
+      "risks": ["Current quote and corporate actions remain unverified."],
+      "recoveryCatalysts": [],
+      "marketContext": "Current market context could not be independently verified.",
+      "symbol": "EXAMPLE",
+      "corporateActionsClear": false,
+      "dataGapReason": "No verifiable timestamped quote was available within the research budget.",
+      "evidenceIds": {},
+      "additionalEvidenceIds": []
+    },
+    "type": "tool_call",
+    "id": "call-5a0ad5aa-ffc1-42a1-8288-916723d61978"
+  }
+}

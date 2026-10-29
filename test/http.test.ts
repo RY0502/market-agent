@@ -6,15 +6,16 @@ import path from 'node:path';
 import os from 'node:os';
 import { Jobs } from '../src/jobs.js';
 import { createHttpServer } from '../src/http.js';
-import { addDays, monthsBefore, todayIST } from '../src/dates.js';
+import { addDays, todayIST } from '../src/dates.js';
 import { initializeStorage } from '../src/storage.js';
-import { csv, equity, research, zipResponse } from './helpers.js';
+import { csv, equity, research, zipResponse, reportStub, seedNse } from './helpers.js';
 import { loadScreeningConfig } from '../src/screening.js';
 import { publicationFile } from '../src/publish.js';
 
 async function seed(root: string) {
   const date = todayIST();
-  for (let day = monthsBefore(date, 1); day <= date; day = addDays(day, 1)) {
+  for (let day = addDays(date, -30); day <= date; day = addDays(day, 1)) {
+    await seedNse(root, day);
     await writeFile(path.join(root, 'bhav', `${day}.csv`), csv(day, [
       equity({ date: day, close: day === date ? 500 : 300, high: day === date ? 520 : 320, low: day === date ? 480 : 280 }),
       equity({ date: day, symbol: 'FALL', isin: 'INE000B01001', close: day === date ? 500 : 800,
@@ -23,20 +24,21 @@ async function seed(root: string) {
   }
 }
 
-test('unauthenticated HTTP trigger runs both groups, persists status, rejects overlaps and publishes once', async () => {
+test('unauthenticated HTTP trigger researches gainers only, persists status, rejects overlaps and publishes once', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'nse-http-'));
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   let publications = 0;
+  let resets = 0;
   const jobs = new Jobs({
-    root,
+    root, report: reportStub,
+    resetFrameworkState: async () => { resets++; },
     screeningConfig: () => loadScreeningConfig({}),
-    researcher: () => async c => { await gate; return research(c.symbol); },
+    researcher: () => async c => { assert.equal(resets, 1); await gate; return research(c.symbol); },
     publish: async (result, id) => {
       publications++;
       assert.equal(result.gainers.length, 1);
-      assert.equal(result.losers.length, 1);
-      assert.equal(result.losers[0]!.candidate.change, -300);
+      assert.equal(result.losers.length, 0);
       await writeFile(publicationFile(root, id), '{"phase":"inserted"}');
       await writeFile(path.join(root, 'runs', `${todayIST()}.${id}.jsonl`), 'legacy intermediate');
     },
@@ -65,10 +67,11 @@ test('unauthenticated HTTP trigger runs both groups, persists status, rejects ov
     assert.equal(result.status, 'completed');
     assert.equal(result.downloads, 0);
     assert.equal(publications, 1);
+    assert.equal(resets, 1);
     assert.deepEqual(await readdir(path.join(root, 'reduced')), []);
     assert.ok((await readdir(path.join(root, 'bhav'))).length > 1);
     assert.equal((await jobs.get(response.id))!.results, undefined);
-    assert.deepEqual((await jobs.get(response.id))!.inserted, { gainers: 1, losers: 1 });
+    assert.deepEqual((await jobs.get(response.id))!.inserted, { gainers: 1, losers: 0 });
     assert.ok((await readdir(path.join(root, 'runs'))).every(file => file.endsWith(`.${response.id}.json`)));
     assert.equal((await fetch(`${base}/runs/invalid`)).status, 404);
   } finally {
@@ -85,7 +88,8 @@ test(`missing requested-day bhavcopy (${date}) skips without research or Supabas
   let researched = false;
   let published = false;
   const jobs = new Jobs({
-    root, request: async () => new Response('', { status: 404 }),
+    root, report: reportStub, request: async () => new Response('', { status: 404 }),
+    resetFrameworkState: async () => {},
     screeningConfig: () => loadScreeningConfig({}),
     researcher: () => async c => { researched = true; return research(c.symbol); },
     publish: async () => { published = true; },
@@ -111,7 +115,8 @@ test('a run with no available historical baseline skips without touching Supabas
   let researched = false;
   let published = false;
   const jobs = new Jobs({
-    root, screeningConfig: () => loadScreeningConfig({}),
+    root, report: reportStub, screeningConfig: () => loadScreeningConfig({}),
+    resetFrameworkState: async () => {},
     request: async input => String(input).includes('20261028')
       ? zipResponse(csv('2026-10-28')) : new Response('', { status: 404 }),
     researcher: () => async c => { researched = true; return research(c.symbol); },
@@ -132,7 +137,8 @@ test('a run with no available historical baseline skips without touching Supabas
 test('publication failure persists failed state and preserves audit research', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'nse-pubfail-'));
   const jobs = new Jobs({
-    root,
+    root, report: reportStub,
+    resetFrameworkState: async () => {},
     screeningConfig: () => loadScreeningConfig({}),
     researcher: () => async c => research(c.symbol),
     publish: async (_results, id) => {
@@ -157,13 +163,51 @@ test('publication failure persists failed state and preserves audit research', a
   } finally { await rm(root, { recursive: true }); }
 });
 
+test('Neon reset precedes downloads and skips; reset failure prevents all later work', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'reset-order-'));
+  const events: string[] = [];
+  let resetFails = false;
+  const jobs = new Jobs({
+    root, report: reportStub, screeningConfig: () => loadScreeningConfig({}),
+    resetFrameworkState: async () => {
+      events.push('reset');
+      if (resetFails) throw new Error('Neon reset unavailable');
+    },
+    request: async () => {
+      assert.deepEqual(events, ['reset']);
+      events.push('download');
+      return new Response('', { status: 404 });
+    },
+    researcher: () => { throw new Error('Research must not start'); },
+    publish: async () => { throw new Error('Publication must not start'); },
+  });
+  try {
+    await jobs.initialize();
+    const skipped = await jobs.start('2026-10-25');
+    await jobs.wait();
+    assert.equal((await jobs.get(skipped.id))!.status, 'skipped');
+    assert.deepEqual(events, ['reset', 'download']);
+    events.length = 0;
+    resetFails = true;
+    const failed = await jobs.start('2026-10-25');
+    await jobs.wait();
+    const status = (await jobs.get(failed.id))!;
+    assert.equal(status.status, 'failed');
+    assert.equal(status.phase, 'resetting_framework');
+    assert.match(status.error!, /Neon reset unavailable/);
+    assert.deepEqual(events, ['reset']);
+  } finally { await rm(root, { recursive: true }); }
+});
+
 test('each new run snapshots fresh screening settings and reuses cached files without fallback', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'nse-settings-'));
   let settings = loadScreeningConfig({});
   let researched = 0;
   const counts: number[] = [];
+  let resets = 0;
   const jobs = new Jobs({
-    root, screeningConfig: () => settings,
+    root, report: reportStub, screeningConfig: () => settings,
+    resetFrameworkState: async () => { resets++; },
     researcher: () => async c => { researched++; return research(c.symbol); },
     publish: async results => { counts.push(results.gainers.length + results.losers.length); },
     request: async () => { throw new Error('New settings must reuse original cached CSVs'); },
@@ -176,8 +220,9 @@ test('each new run snapshots fresh screening settings and reuses cached files wi
     settings = loadScreeningConfig({ GAINERS_INCREASE_RS: '300', LOSERS_DECREASE_RS: '400' });
     const second = await jobs.start();
     await jobs.wait();
-    assert.deepEqual(counts, [2, 0]);
-    assert.equal(researched, 2);
+    assert.deepEqual(counts, [1, 0]);
+    assert.equal(researched, 1);
+    assert.equal(resets, 2);
     assert.equal((await jobs.get(first.id))!.settings.gainers.threshold, 100);
     assert.equal((await jobs.get(second.id))!.settings.gainers.threshold, 300);
     assert.equal((await jobs.get(second.id))!.downloads, 0);

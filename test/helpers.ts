@@ -1,6 +1,48 @@
 import { zipSync, strToU8 } from 'fflate';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import type { ChatResult } from '@langchain/core/outputs';
 import type { Candidate, Equity } from '../src/bhav.js';
 import type { Assessment, ResearchResult } from '../src/research.js';
+import type { Reporter } from '../src/reports.js';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+export function reportReference(symbol = 'EXAMPLE', runId = 'test') {
+  return { url: `https://reports.example.org/stock-reports/${runId}/gainers/${encodeURIComponent(symbol)}.html`,
+    expiresAt: '2100-01-01T00:00:00.000Z' };
+}
+export const reportStub: Reporter = async (stock, runId) => reportReference(stock.candidate.symbol, runId);
+
+export function prFixture(date: string, symbol = 'EXAMPLE', marketCap = '100000000000', actions = ''): Uint8Array {
+  const stamp = date.slice(8) + date.slice(5, 7) + date.slice(0, 4);
+  return zipSync({
+    [`mcap${stamp}.csv`]: strToU8(`Trade Date,Symbol,Series,Market Cap(Rs.)\n${date},${symbol},EQ,${marketCap}`),
+    [`bc${stamp}.csv`]: strToU8('SERIES,SYMBOL,RECORD_DT,BC_STRT_DT,BC_END_DT,EX_DT,PURPOSE\n' + actions),
+  });
+}
+export async function seedNse(root: string, date: string): Promise<void> {
+  await writeFile(path.join(root, 'nse', `${date}.pe.csv`), 'SYMBOL,SYMBOL P/E,ADJUSTED P/E\nEXAMPLE,20,21');
+  await writeFile(path.join(root, 'nse', `${date}.pr.zip`), prFixture(date));
+}
+
+export class ScriptedModel extends BaseChatModel {
+  calls: BaseMessage[][] = [];
+  bindings: unknown[][] = [];
+  constructor(private replies: (AIMessage | Error)[]) { super({}); }
+  _llmType() { return 'research-test'; }
+  bindTools(...args: unknown[]) {
+    this.bindings.push(args);
+    return this;
+  }
+  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+    this.calls.push(messages);
+    const message = this.replies.shift();
+    if (!message) throw new Error('No unexpected extra model calls');
+    if (message instanceof Error) throw message;
+    return { generations: [{ message, text: typeof message.content === 'string' ? message.content : '' }] };
+  }
+}
 
 export function equity(overrides: Partial<Equity> = {}): Equity {
   return {
