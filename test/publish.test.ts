@@ -35,6 +35,22 @@ test('publication payload contains only display columns, never reasons or metada
   assert.equal(row.profit_probability, 'high');
 });
 
+test('publication payload rounds change_percent to 2 decimal places maximum for gainers and losers', () => {
+  const gainerStock = { ...stock(), candidate: { ...stock().candidate, changePercent: 12.34567 } };
+  const gainerRow = publicationRow(gainerStock, '2026-10-27T12:00:00Z');
+  assert.equal(gainerRow.change_percent, 12.35);
+
+  const loserStock = { ...stock(), candidate: { ...stock().candidate, group: 'losers' as const, change: -150, changePercent: -18.76543 } };
+  const loserRow = publicationRow(loserStock, '2026-10-27T12:00:00Z');
+  assert.equal(loserRow.change_percent, -18.77);
+
+  const singleDecimal = { ...stock(), candidate: { ...stock().candidate, changePercent: 10.4 } };
+  assert.equal(publicationRow(singleDecimal, '2026-10-27T12:00:00Z').change_percent, 10.4);
+
+  const integerDecimal = { ...stock(), candidate: { ...stock().candidate, changePercent: 25 } };
+  assert.equal(publicationRow(integerDecimal, '2026-10-27T12:00:00Z').change_percent, 25);
+});
+
 for (const [gainers, losers] of [[99, 99], [100, 99], [99, 100], [101, 126]]) {
   test(`direct publication prunes gainers and leaves paused losers untouched (${gainers}/${losers})`, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'nse-direct-'));

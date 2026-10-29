@@ -14,7 +14,7 @@ export function publicationRow(stock: RankedStock, updatedAt: string) {
     name: stock.candidate.name,
     price: stock.candidate.price,
     change: stock.candidate.change,
-    change_percent: stock.candidate.changePercent,
+    change_percent: Math.round(stock.candidate.changePercent * 100) / 100,
     updated_at: updatedAt,
     profit_probability: stock.research.assessment.profitProbability,
     report_url: report.url,

@@ -32,6 +32,15 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       void jobs.wait().catch(error => {
         console.error(error);
         process.exitCode = 1;
+      }).finally(async () => {
+        if (process.env.PAUSE_BASE_URL) {
+          try {
+            const { pauseVm } = await import('./services/vmPauseService.js');
+            await pauseVm();
+          } catch (pauseError) {
+            console.error('VM pause failed on server shutdown:', pauseError);
+          }
+        }
       });
     });
   });

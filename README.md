@@ -60,7 +60,13 @@ Existing R2 report URLs are not migrated. If you previously deployed R2, leave i
 npm run build
 npm start
 # or: npm run dev
+# For HTTP server: npm run server (or npm run dev:server)
 ```
+
+### Freestyle VM lifecycle & pause
+
+Every canonical agent invocation first runs Neon framework-state cleanup, validates the pause configuration, and runs the market agent. Whether the run succeeds, skips, or throws an error, it then sends one bounded GET to:
+`${PAUSE_BASE_URL}/pause/vm?machine=${MACHINE_NO}`
 
 The framework revision is pinned in `package.json`; transitive resolutions are recorded in `package-lock.json`. The upstream repository ships its compiled library.
 
