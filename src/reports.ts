@@ -16,6 +16,7 @@ const escape = (text: string) => text.replace(/[&<>"']/g, character => ({
 const number = (value: number) => value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
 const money = (value: number) => `&#8377;${number(value)}`;
 
+/** Select supported narrative and financial context for the public report. */
 export function reportReasoning(stock: RankedStock) {
   const assessment = stock.research.assessment;
   const warnings = new Set((assessment.warnings ?? []).map(warning => warning.message));
@@ -39,11 +40,14 @@ export function reportReasoning(stock: RankedStock) {
         (warning.field === field || warning.field === `evidenceIds.${field}`) &&
         ['invalid_submission_field', 'uncited_metric', 'numeric_evidence_mismatch', 'unobserved_source', 'missing_context'].includes(warning.code));
       const nse = stock.candidate.nse;
-      const date = nse && (field === 'pe' || field === 'marketCapCrore')
+      const screenerRead = metric?.source && stock.research.reads.find(read =>
+        read.kind === 'scrape' && read.url === metric.source?.url && read.output === metric.source.excerpt);
+      const date = screenerRead ? screenerRead.observedAt.slice(0, 10) : nse && (field === 'pe' || field === 'marketCapCrore')
         ? nse[field] ? nse.asOf : nse.historical?.[field]?.asOf
         : undefined;
+      if (field === 'pe' && nse && !nse.pe && !screenerRead) return [];
       return metric && metric.source && Number.isFinite(metric.value) && !invalid
-        ? [{ label, value: metric.value, asOf: date, historical: Boolean(date && date < stock.candidate.asOfDate) }] : [];
+        ? [{ label, value: metric.value, asOf: date, retrieved: Boolean(screenerRead), historical: Boolean(!screenerRead && date && date < stock.candidate.asOfDate) }] : [];
     }),
   };
 }
@@ -75,6 +79,7 @@ ${prices.map((point, index) => `<circle class="${trend}" cx="${x(index)}" cy="${
     `<tr><td>${escape(point.date)}</td><td>${money(point.close)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
+/** Render the public stock report without the detailed P/E history. */
 export function renderStockReport(
   stock: RankedStock, runId: string, prices: PricePoint[], requestedPoints: number, createdAt: string, expiresAt: string,
 ): string {
@@ -96,9 +101,8 @@ export function renderStockReport(
     : stock.research.failure ? 'No background cache reused; research unavailable' : 'Fresh research (no background cache reused)';
   const category = assessment.profitProbability ?? 'Unsure';
   const nse = candidate.nse;
-  const adjustedPe = nse?.adjustedPe ?? nse?.historical?.adjustedPe?.value;
-  const adjustedPeDate = nse?.adjustedPe != null ? nse.asOf : nse?.historical?.adjustedPe?.asOf;
-  const peHistory = nse?.history.filter(point => point.pe !== null || point.adjustedPe !== null) ?? [];
+  const adjustedPe = nse?.adjustedPe;
+  const adjustedPeDate = adjustedPe != null ? nse?.asOf : undefined;
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
@@ -118,17 +122,18 @@ header,section,footer{overflow-wrap:anywhere}footer{padding:0 8px 20px}
 <div class="card">Next-week outlook<span class="value">${escape(category)}</span></div>
 <div class="card">Screen-period change<span class="value">${money(candidate.change)}</span>${escape(number(candidate.changePercent))}% (${escape(candidate.baselineDate)} to ${escape(candidate.asOfDate)})</div></div>
 <p class="badge">${escape(cacheText)}</p>${cache?.backgroundResearchedAt ? `<p class="muted">Background researched: ${escape(cache.backgroundResearchedAt)}</p>` : ''}
-<p class="muted">Assessment recorded: ${escape(stock.research.researchedAt)}</p>${stock.research.failure ? '<p>Research was unavailable for this assessment. No investment outlook was produced.</p>' : ''}</header>
+<p class="muted">Assessment recorded: ${escape(stock.research.researchedAt)}</p>${stock.research.failure
+    ? stock.research.reads.some(read => read.kind === 'scrape' && read.url.startsWith('https://www.screener.in/company/'))
+      ? '<p>Initial research was unavailable; review the assessment and its limitations carefully.</p>'
+      : '<p>Research was unavailable for this assessment. No investment outlook was produced.</p>'
+    : ''}</header>
 <section><h2>Recent price performance</h2><p class="muted">Daily NSE bhavcopy closing prices, not intraday/live quotes. Prices are unadjusted for corporate actions.</p>${priceChart(ordered, requestedPoints)}</section>
 ${section('Investment outlook', reasoning.classificationReason)}
 ${list('Supporting considerations', reasoning.reasons)}${list('Business and investment risks', reasoning.risks)}
 ${list('Potential catalysts', reasoning.catalysts)}${section('Market context', reasoning.marketContext)}
 ${reasoning.metrics.length || adjustedPe != null ? `<section><h2>Available financial context</h2><p class="muted">Dated reported figures${!nse && assessment.financialPeriod ? `: ${escape(assessment.financialPeriod.slice(0, 100))}` : ''}; not live financial statements. Historical values may not reflect the analysis date's valuation.</p><div class="cards">${reasoning.metrics.map(metric =>
-    `<div class="card">${metric.label}<span class="value">${escape(number(metric.value))}</span>${metric.asOf ? `<span class="muted">${metric.historical ? 'Historical context' : 'As of'}: ${escape(metric.asOf)}</span>` : ''}</div>`).join('')}
+    `<div class="card">${metric.label}<span class="value">${escape(number(metric.value))}</span>${metric.asOf ? `<span class="muted">${metric.retrieved ? 'Screener retrieved' : metric.historical ? 'Historical context' : 'As of'}: ${escape(metric.asOf)}</span>` : ''}</div>`).join('')}
 ${adjustedPe != null && adjustedPeDate ? `<div class="card">Adjusted P/E (distinct NSE figure)<span class="value">${escape(number(adjustedPe))}</span><span class="muted">${adjustedPeDate < candidate.asOfDate ? 'Historical context' : 'As of'}: ${escape(adjustedPeDate)}</span></div>` : ''}</div></section>` : ''}
-${peHistory.length ? `<section><h2>NSE P/E history</h2><p class="muted">Dated NSE SYMBOL P/E and ADJUSTED P/E are distinct figures. Missing entries are not zero; changes in P/E alone do not measure earnings growth.</p>
-<div class="table-wrap"><table><thead><tr><th>Date</th><th>Symbol P/E</th><th>Adjusted P/E</th></tr></thead><tbody>${peHistory.map(point =>
-    `<tr><td>${escape(point.date)}</td><td>${point.pe === null ? '&mdash;' : escape(number(point.pe))}</td><td>${point.adjustedPe === null ? '&mdash;' : escape(number(point.adjustedPe))}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
 ${nse?.corporateActions.length ? list('NSE corporate-action notices', nse.corporateActions.map(action =>
     `${action.purpose}; ${action.exDate ? `ex-date ${action.exDate}` : `record/book date ${action.recordDate ?? action.bookStart ?? 'not supplied'}`}; reported ${action.reportedOn}`)) : ''}
 <footer><p>Qualitative research, not a calibrated probability or guarantee of returns. Review source filings and current market information before investing. Technical extraction diagnostics are retained in the run audit, not displayed here.</p>
