@@ -49,6 +49,7 @@ export interface JobDependencies {
   request?: typeof fetch;
   screeningConfig?: () => ScreeningConfig;
   resetFrameworkState: () => Promise<void>;
+  enrich?: (stocks: RankedStock[], runId: string) => Promise<void>;
 }
 
 export class Jobs {
@@ -134,6 +135,7 @@ export class Jobs {
     return contents ? JSON.parse(contents.toString()) as Job : undefined;
   }
 
+  /** Run screening, research, sequential enrichment, reporting and publication in order. */
   private async execute(job: Job): Promise<void> {
     const store = new BhavStore(this.deps.root, this.deps.request);
     const fundamentals = new NseFundamentalsStore(this.deps.root, this.deps.request);
@@ -193,13 +195,22 @@ export class Jobs {
         });
         await this.save(job);
       }, job.id);
+      job.phase = 'enriching';
+      await this.save(job);
+      if (this.deps.enrich) await this.deps.enrich([...results.gainers, ...results.losers], job.id);
       for (const stock of [...results.gainers, ...results.losers]) {
         refreshClassification(stock, Date.now(), job.id);
       }
       for (const outcome of job.stockOutcomes) {
         const stock = [...results.gainers, ...results.losers].find(stock =>
           stock.candidate.isin === outcome.isin && stock.candidate.group === outcome.group);
-        if (stock) outcome.warnings = stock.research.assessment.warnings ?? [];
+        if (stock) {
+          outcome.profitProbability = stock.research.assessment.profitProbability;
+          outcome.classificationReason = stock.research.assessment.classificationReason;
+          outcome.dataGapReason = stock.research.assessment.dataGapReason;
+          outcome.warnings = stock.research.assessment.warnings ?? [];
+          outcome.failure = stock.research.failure;
+        }
       }
       job.results = results;
       job.phase = 'reporting';
