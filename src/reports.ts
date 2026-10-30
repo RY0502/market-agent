@@ -1,5 +1,6 @@
 import type { PricePoint } from './bhav.js';
 import type { RankedStock } from './research.js';
+import { isTradingViewSource } from './tradingview-source.js';
 
 export interface ReportReference {
   url: string;
@@ -40,14 +41,16 @@ export function reportReasoning(stock: RankedStock) {
         (warning.field === field || warning.field === `evidenceIds.${field}`) &&
         ['invalid_submission_field', 'uncited_metric', 'numeric_evidence_mismatch', 'unobserved_source', 'missing_context'].includes(warning.code));
       const nse = stock.candidate.nse;
-      const screenerRead = metric?.source && stock.research.reads.find(read =>
-        read.kind === 'scrape' && read.url === metric.source?.url && read.output === metric.source.excerpt);
-      const date = screenerRead ? screenerRead.observedAt.slice(0, 10) : nse && (field === 'pe' || field === 'marketCapCrore')
+      const tradingViewRead = metric?.source && stock.research.reads.find(read =>
+        read.kind === 'scrape' && isTradingViewSource(read.url) &&
+        read.url === metric.source?.url && read.output === metric.source.excerpt);
+      const date = tradingViewRead ? tradingViewRead.observedAt.slice(0, 10) : nse && (field === 'pe' || field === 'marketCapCrore')
         ? nse[field] ? nse.asOf : nse.historical?.[field]?.asOf
         : undefined;
-      if (field === 'pe' && nse && !nse.pe && !screenerRead) return [];
+      if (field === 'pe' && nse && !nse.pe && !tradingViewRead) return [];
       return metric && metric.source && Number.isFinite(metric.value) && !invalid
-        ? [{ label, value: metric.value, asOf: date, retrieved: Boolean(screenerRead), historical: Boolean(!screenerRead && date && date < stock.candidate.asOfDate) }] : [];
+        ? [{ label: tradingViewRead && field === 'pe' ? 'P/E (TTM)' : label,
+          value: metric.value, asOf: date, retrieved: Boolean(tradingViewRead), historical: Boolean(!tradingViewRead && date && date < stock.candidate.asOfDate) }] : [];
     }),
   };
 }
@@ -123,7 +126,7 @@ header,section,footer{overflow-wrap:anywhere}footer{padding:0 8px 20px}
 <div class="card">Screen-period change<span class="value">${money(candidate.change)}</span>${escape(number(candidate.changePercent))}% (${escape(candidate.baselineDate)} to ${escape(candidate.asOfDate)})</div></div>
 <p class="badge">${escape(cacheText)}</p>${cache?.backgroundResearchedAt ? `<p class="muted">Background researched: ${escape(cache.backgroundResearchedAt)}</p>` : ''}
 <p class="muted">Assessment recorded: ${escape(stock.research.researchedAt)}</p>${stock.research.failure
-    ? stock.research.reads.some(read => read.kind === 'scrape' && read.url.startsWith('https://www.screener.in/company/'))
+    ? stock.research.reads.some(read => read.kind === 'scrape' && isTradingViewSource(read.url))
       ? '<p>Initial research was unavailable; review the assessment and its limitations carefully.</p>'
       : '<p>Research was unavailable for this assessment. No investment outlook was produced.</p>'
     : ''}</header>
@@ -132,7 +135,7 @@ ${section('Investment outlook', reasoning.classificationReason)}
 ${list('Supporting considerations', reasoning.reasons)}${list('Business and investment risks', reasoning.risks)}
 ${list('Potential catalysts', reasoning.catalysts)}${section('Market context', reasoning.marketContext)}
 ${reasoning.metrics.length || adjustedPe != null ? `<section><h2>Available financial context</h2><p class="muted">Dated reported figures${!nse && assessment.financialPeriod ? `: ${escape(assessment.financialPeriod.slice(0, 100))}` : ''}; not live financial statements. Historical values may not reflect the analysis date's valuation.</p><div class="cards">${reasoning.metrics.map(metric =>
-    `<div class="card">${metric.label}<span class="value">${escape(number(metric.value))}</span>${metric.asOf ? `<span class="muted">${metric.retrieved ? 'Screener retrieved' : metric.historical ? 'Historical context' : 'As of'}: ${escape(metric.asOf)}</span>` : ''}</div>`).join('')}
+    `<div class="card">${metric.label}<span class="value">${escape(number(metric.value))}</span>${metric.asOf ? `<span class="muted">${metric.retrieved ? 'TradingView retrieved' : metric.historical ? 'Historical context' : 'As of'}: ${escape(metric.asOf)}</span>` : ''}</div>`).join('')}
 ${adjustedPe != null && adjustedPeDate ? `<div class="card">Adjusted P/E (distinct NSE figure)<span class="value">${escape(number(adjustedPe))}</span><span class="muted">${adjustedPeDate < candidate.asOfDate ? 'Historical context' : 'As of'}: ${escape(adjustedPeDate)}</span></div>` : ''}</div></section>` : ''}
 ${nse?.corporateActions.length ? list('NSE corporate-action notices', nse.corporateActions.map(action =>
     `${action.purpose}; ${action.exDate ? `ex-date ${action.exDate}` : `record/book date ${action.recordDate ?? action.bookStart ?? 'not supplied'}`}; reported ${action.reportedOn}`)) : ''}
