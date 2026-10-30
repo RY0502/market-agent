@@ -20,6 +20,11 @@ const cacheSchema = z.object({
   }),
 }).refine(record => record.baselineDate < record.asOfDate, 'Research cache comparison window is invalid');
 
+/** Background reuse lasts half the lookback window, capped at seven days for longer windows. */
+export function cacheReuseDays(lookbackDays: number): number {
+  return lookbackDays > 7 ? 7 : lookbackDays / 2;
+}
+
 export function withResearchCache(
   root: string, lookbackDays: number, runId: string, researcher: Researcher, now: () => number = Date.now,
 ): Researcher {
@@ -35,7 +40,7 @@ export function withResearchCache(
         throw new Error('Research cache stock identity mismatch');
       }
       const researchedAt = Date.parse(record.result.researchedAt);
-      const until = researchedAt + lookbackDays / 2 * 86_400_000;
+      const until = researchedAt + cacheReuseDays(lookbackDays) * 86_400_000;
       if (researchedAt > now()) throw new Error('Research cache timestamp is in the future');
       if (now() < until && record.symbol === candidate.symbol && record.result.reads.length) {
         cached = {
