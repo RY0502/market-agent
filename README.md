@@ -106,7 +106,7 @@ LOSERS_MIN_PRICE=200
 LOSERS_MAX_PRICE=1500
 ```
 
-`LOOKBACK_DAYS` must be a positive safe integer in calendar days; it also determines the background-research reuse window (`LOOKBACK_DAYS / 2`, default 15 days). Amounts must be positive, finite and have at most two decimal places. Each minimum must not exceed its maximum. Invalid settings fail explicitly. A running job keeps its initial settings even if `.env` changes halfway through it.
+`LOOKBACK_DAYS` must be a positive safe integer in calendar days; background-research reuse uses half of it for windows up to 7 days and is capped at 7 days for longer windows. Amounts must be positive, finite and have at most two decimal places. Each minimum must not exceed its maximum. Invalid settings fail explicitly. A running job keeps its initial settings even if `.env` changes halfway through it.
 
 **Only gainers are active.** Loser screening/research/publication code and settings are retained, but the `'losers'` entry in `ACTIVE_GROUPS` in `src/screening.ts` is commented out. No loser research is run and `top_losers` is not counted, pruned or written.
 
@@ -184,7 +184,7 @@ Legacy quote-timestamp parsing remains for old assessment/cache compatibility. N
 
 ### Disk-cached background research
 
-Completed stock research is cached by ISIN in `data/research-cache/ISIN.json`, retaining warnings, captured source content, original observation times and the comparison window. If younger than half the current `LOOKBACK_DAYS` (15 days by default), reuse dated business/sector context. Each run supplies its own dated NSE file metrics; cached numerical metrics and action-clear flags are not reused. Cache hits never extend the original research age. Expired or absent entries trigger full news/business research.
+Completed stock research is cached by ISIN in `data/research-cache/ISIN.json`, retaining warnings, captured source content, original observation times and the comparison window. If younger than the reuse window, reuse dated business/sector context. The window is half of `LOOKBACK_DAYS` for 7 days or fewer, and a hard 7 days for longer lookbacks (7 days with the default 30-day lookback). Each run supplies its own dated NSE file metrics; cached numerical metrics and action-clear flags are not reused. Cache hits never extend the original research age. Expired or absent entries trigger full news/business research.
 
 **Cache hits use a constrained refresh, not the general planning/research loop.** The application runs **one fixed material-company-news search** through the framework Tavily tool: `topic="news"`, `days=7`, `maxResults=3`. It does not search for quotes or numerical metrics. Then the model normally makes one structured assessment request. It may read one bounded source page first (at most two successful model responses total), but cannot delegate, crawl, scrape, repeat searches or plan TODOs. Recognized network failures can retry once; provider rotation, existing budgets and the original deadline still apply. Search failures become explicit warnings; the assessment proceeds using dated NSE/business context.
 
