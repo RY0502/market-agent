@@ -6,7 +6,7 @@ import { createResearcher } from './research.js';
 import { createPublisher } from './publish.js';
 import { resetFrameworkState } from './neon.js';
 import { createReporter, verifyReportHosting } from './report-storage.js';
-import { enrichStocks } from './screener.js';
+import { enrichStocks } from './tradingview.js';
 
 const config = loadConfig();
 validateConfig();
