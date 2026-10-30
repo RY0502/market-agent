@@ -14,14 +14,22 @@ for (const lookback of [2, 3, 30]) {
     let reports = 0;
     let publications = 0;
     let failUpload = false;
+    let enriched = 0;
     const date = todayIST();
     const jobs: Jobs = new Jobs({
       root, screeningConfig: () => loadScreeningConfig({ LOOKBACK_DAYS: String(lookback) }),
       resetFrameworkState: async () => {},
       researcher: () => async c => research(c.symbol),
+      enrich: async stocks => {
+        enriched++;
+        stocks[0]!.research.assessment.profitProbability = 'medium';
+        stocks[0]!.research.assessment.classificationReason = 'The completed enrichment changes the final investment outlook.';
+      },
       request: async () => { throw new Error('All bhavcopies must be cached'); },
       report: async (stock, runId, prices, count) => {
         reports++;
+        assert.equal(enriched, reports);
+        assert.equal(stock.research.assessment.profitProbability, 'medium');
         if (failUpload) throw new Error('Cloudflare upload unavailable');
         assert.equal(count, Math.min(5, lookback));
         assert.equal(prices.length, count);
@@ -32,6 +40,9 @@ for (const lookback of [2, 3, 30]) {
         publications++;
         assert.equal(results.gainers[0]!.report!.url, reportReference('EXAMPLE', runId).url);
         const persisted = (await jobs.get(runId))!;
+        assert.equal(results.gainers[0]!.research.assessment.profitProbability, 'medium');
+        assert.equal(persisted.stockOutcomes![0]!.profitProbability, 'medium');
+        assert.equal(persisted.stockOutcomes![0]!.classificationReason, 'The completed enrichment changes the final investment outlook.');
         assert.equal(persisted.stockOutcomes![0]!.report!.url, results.gainers[0]!.report!.url);
         assert.equal(persisted.stockOutcomes![0]!.cache!.hit, publications > 1);
       },
