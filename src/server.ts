@@ -6,6 +6,7 @@ import { createResearcher } from './research.js';
 import { createPublisher } from './publish.js';
 import { resetFrameworkState } from './neon.js';
 import { createReporter, verifyReportHosting } from './report-storage.js';
+import { enrichStocks } from './screener.js';
 
 const config = loadConfig();
 validateConfig();
@@ -14,6 +15,7 @@ const db = new DatabaseClient(CONFIG.NEON_DATABASE_URL);
 const jobs = new Jobs({
   root: config.DATA_DIR,
   researcher: id => createResearcher(config.DATA_DIR, id),
+  enrich: (stocks, id) => enrichStocks(stocks, config.DATA_DIR, id),
   resetFrameworkState: () => resetFrameworkState(db),
   publish: createPublisher(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, config.DATA_DIR),
   report: createReporter(config),
