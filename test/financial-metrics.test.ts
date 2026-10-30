@@ -16,6 +16,7 @@ test('explicit currency, amount units, ratio suffixes and percent signs normaliz
     ['marketCapCrore', '1,32,928.50 crore', 132928.5],
     ['marketCapCrore', 'INR 100000000000', 10000],
     ['marketCapCrore', '2 billion', 200],
+    ['marketCapCrore', '1 T', 100000],
     ['marketCapCrore', '5 million', 0.5],
     ['marketCapCrore', '50 lakh', 0.5],
     ['marketCapCrore', 'INR 42 cr', 42],
@@ -42,6 +43,8 @@ test('ambiguous units, invalid grouping, impossible values and unsupported forma
 
 test('numeric corroboration recognizes explicit crore conversions but does not guess the units of bare amounts', () => {
   assert.equal(metricOccursInText('marketCapCrore', 200, 'Market cap INR 2 billion.'), true);
+  assert.equal(metricOccursInText('marketCapCrore', 2036, 'Market capitalization 20.36 B INR.'), true);
+  assert.equal(metricOccursInText('marketCapCrore', 100000, 'Market capitalization 1 T INR.'), true);
   assert.equal(metricOccursInText('marketCapCrore', 200, 'Market cap Rs 2,000,000,000.'), true);
   assert.equal(metricOccursInText('marketCapCrore', 200, 'Market cap 200 crore.'), true);
   assert.equal(metricOccursInText('marketCapCrore', 200, 'Market cap 2000000000.'), false);
