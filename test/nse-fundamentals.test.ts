@@ -135,10 +135,11 @@ test('missing current NSE metrics use independent latest valid historical dates 
     const ranked = { candidate: c, research: result, rank: 1, riskScore: 20, recoveryScore: 80 };
     const metrics = reportReasoning(ranked).metrics;
     assert.deepEqual(metrics.filter(metric => ['P/E','Market cap (INR crore)'].includes(metric.label))
-      .map(metric => [metric.value, metric.asOf, metric.historical]), [[18,'2026-10-26',true],[2000,'2026-10-27',true]]);
+      .map(metric => [metric.value, metric.asOf, metric.historical]), [[2000,'2026-10-27',true]]);
     const html = renderStockReport(ranked, 'historical-test', [], 1, new Date().toISOString(), '2100-01-01T00:00:00Z');
-    assert.match(html, /Historical context: 2026-10-26/);
-    assert.match(html, /Adjusted P\/E \(distinct NSE figure\)/);
+    assert.doesNotMatch(html, /Historical context: 2026-10-26/);
+    assert.doesNotMatch(html, /Adjusted P\/E \(distinct NSE figure\)/);
+    assert.doesNotMatch(html, /NSE P\/E history/);
     assert.match(html, /Historical context: 2026-10-27/);
     assert.doesNotMatch(html, /As of: 2026-10-28/);
   } finally { await rm(root, { recursive: true }); }
@@ -357,7 +358,7 @@ test('official NSE metrics override model/cache values, retain positive action e
     assert.equal(refreshed.assessment.pe!.value, first.assessment.pe!.value);
     const html = renderStockReport({ candidate: c, research: refreshed, rank: 1, riskScore: 20, recoveryScore: 80 },
       'test', [{ date: c.asOfDate, close: c.price }], 1, new Date().toISOString(), '2100-01-01T00:00:00Z');
-    assert.match(html, /NSE P\/E history/);
+    assert.doesNotMatch(html, /NSE P\/E history/);
     assert.match(html, /25\.5/);
     assert.match(html, /BONUS 1:1/);
     assert.doesNotMatch(html, /Debt \/ equity|Earnings growth \(%\)/);
