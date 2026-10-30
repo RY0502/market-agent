@@ -3,12 +3,19 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { withResearchCache } from '../src/research-cache.js';
+import { cacheReuseDays, withResearchCache } from '../src/research-cache.js';
 import { LiveEvidence, resolveSubmission, submissionExamples, validateAssessment } from '../src/research.js';
 import { candidate, research } from './helpers.js';
 import { cleanupRun, initializeStorage } from '../src/storage.js';
 
-test('background cache reuses the first half-window without extending it and still refreshes every assessment', async () => {
+test('cache reuse is half the window up to seven days, then capped at seven days', () => {
+  assert.equal(cacheReuseDays(2), 1);
+  assert.equal(cacheReuseDays(7), 3.5);
+  assert.equal(cacheReuseDays(10), 7);
+  assert.equal(cacheReuseDays(30), 7);
+});
+
+test('background cache reuses the capped window without extending it and still refreshes every assessment', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'research-cache-'));
   let time = Date.now() + 1000;
   const createdAt = time;
@@ -23,7 +30,7 @@ test('background cache reuses the first half-window without extending it and sti
     await initializeStorage(root);
     const fresh = await researcher(candidate());
     assert.deepEqual(fresh.cache, { hit: false, backgroundResearchedAt: undefined, validUntil: undefined });
-    time += 14 * 86_400_000;
+    time += 6 * 86_400_000;
     const refreshed = await researcher(candidate());
     assert.equal(refreshed.cache!.hit, true);
     assert.equal(refreshed.cache!.backgroundResearchedAt, new Date(createdAt).toISOString());
