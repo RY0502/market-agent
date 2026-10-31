@@ -116,7 +116,7 @@ test('assessment collects all evidence caveats, retains model decisions, and sti
   assert.match(unexplained.assessment.dataGapReason!, /did not establish/);
 });
 
-test('all shortlisted stocks remain in rupee-gain order regardless of category or data gaps', async () => {
+test('all shortlisted stocks remain in percentage-gain order regardless of category or data gaps', async () => {
   const candidates = [
     candidate({ symbol: 'LOW', isin: 'INE000A01001', change: 150, changePercent: 20 }),
     candidate({ symbol: 'HIGH', isin: 'INE000B01001', change: 110, changePercent: 40 }),
@@ -134,7 +134,7 @@ test('all shortlisted stocks remain in rupee-gain order regardless of category o
     return result;
   }, async c => { audited.push(c.symbol); });
   assert.equal(selected.gainers.length, 3);
-  assert.deepEqual(selected.gainers.map(s => s.candidate.symbol), ['LOW', 'UNKNOWN', 'HIGH']);
+  assert.deepEqual(selected.gainers.map(s => s.candidate.symbol), ['HIGH', 'UNKNOWN', 'LOW']);
   assert.deepEqual(selected.losers, []);
   assert.equal(audited.length, 3);
   const row = publicationRow({ ...selected.gainers[1]!, report: {
@@ -146,11 +146,11 @@ test('all shortlisted stocks remain in rupee-gain order regardless of category o
   assert.ok(selected.gainers[1]!.research.assessment.dataGapReason);
 });
 
-test('only the top 25 by rupee movement are researched, not by percentage, with losers still paused', async () => {
+test('only the top 25 by percentage movement are researched, with losers still paused', async () => {
   const candidates = ['gainers', 'losers'].flatMap(group => Array.from({ length: 30 }, (_, i) => candidate({
     symbol: `STOCK${i}`, isin: `INE${String(i).padStart(6, '0')}001`,
     group: group as 'gainers' | 'losers', change: group === 'gainers' ? 1000 - i : -1000 + i,
-    changePercent: group === 'gainers' ? i + 1 : -i - 1,
+    changePercent: group === 'gainers' ? 100 - i : -100 + i,
   })));
   const researched: string[] = [];
   const result = await selectStocks(candidates, async c => {
@@ -161,16 +161,16 @@ test('only the top 25 by rupee movement are researched, not by percentage, with 
   assert.equal(result.losers.length, 0);
   assert.equal(researched.length, 25);
   assert.deepEqual(researched, Array.from({ length: 25 }, (_, index) => `gainers/STOCK${index}`));
-  assert.equal(result.gainers[0]!.candidate.symbol, 'STOCK0');
   assert.deepEqual(result.gainers.map(stock => stock.rank), Array.from({ length: 25 }, (_, i) => i + 1));
+  assert.equal(result.gainers[0]!.totalPassing, 30);
 });
 
-test('the loser shortlist uses the 25 largest rupee falls when enabled, not percentage loss', t => {
+test('the loser shortlist uses the 25 largest percentage falls when enabled', t => {
   t.after(() => { Reflect.deleteProperty(ACTIVE_GROUPS, 'includes'); });
   Object.defineProperty(ACTIVE_GROUPS, 'includes', { configurable: true, value: () => true });
   const result = shortlist(Array.from({ length: 30 }, (_, index) => candidate({
     symbol: `LOSS${index}`, isin: `INE${String(index).padStart(6, '0')}001`,
-    group: 'losers', change: -100 - index, changePercent: -100 + index,
+    group: 'losers', change: -100 - index, changePercent: -100 - index,
   })));
   assert.deepEqual(result.gainers, []);
   assert.deepEqual(result.losers.map(stock => stock.symbol),
@@ -196,9 +196,9 @@ test('all qualitative categories validate, missing P/E does not exclude bearish 
   assert.throws(() => assessmentSchema.parse({ ...research().assessment, outlookHorizon: 'next_month' }));
 });
 
-test('equal monthly rupee movements use deterministic symbol order regardless of percentage', () => {
+test('equal percentage movements use deterministic symbol order', () => {
   const result = shortlist([
-    candidate({ symbol: 'ZZZ', changePercent: 90 }), candidate({ symbol: 'AAA', isin: 'INE000B01001', changePercent: 10 }),
+    candidate({ symbol: 'ZZZ', changePercent: 90 }), candidate({ symbol: 'AAA', isin: 'INE000B01001', changePercent: 90 }),
   ]);
   assert.deepEqual(result.gainers.map(stock => stock.symbol), ['AAA', 'ZZZ']);
 });

@@ -28,7 +28,7 @@ test('configured day duration changes the baseline and qualifying movement while
     requests.push(day);
     return zipResponse(csv(day, [equity({
       date: day, close: day === date ? 500 : 350,
-      high: day === date ? 520 : day === addDays(date, -30) ? 450 : 400,
+      high: day === date ? 520 : day === addDays(date, -30) ? 510 : 400,
       low: 300,
     })]));
   });
@@ -37,12 +37,12 @@ test('configured day duration changes the baseline and qualifying movement while
     const week = loadScreeningConfig({ LOOKBACK_DAYS: '7' });
     const short = await store.history(date, week);
     assert.equal(short.baseline, addDays(date, -7));
-    assert.equal(requests.length, 8);
+    assert.equal(requests.length, 31, 'Always downloads 30 days back even for a 7-day screening window');
     assert.deepEqual(screen(short, week).map(c => c.change), [120]);
     const defaults = loadScreeningConfig({});
     const long = await store.history(date, defaults);
     assert.equal(long.baseline, addDays(date, -30));
-    assert.equal(requests.length, 31);
+    assert.equal(requests.length, 31, 'Reuses previously downloaded 30-day history without extra requests');
     assert.deepEqual(screen(long, defaults), []);
   } finally { await rm(root, { recursive: true }); }
 });
@@ -71,44 +71,44 @@ test('modern/legacy parsers validate dates, series, schema and numbers', () => {
 
 test('endpoint HIGH/LOW deltas, exact thresholds, percent denominator and ISIN continuity', () => {
   const base = [
-    equity({ symbol: 'OLDNAME', high: 400, low: 300, close: 350, date: '2026-09-25' }),
+    equity({ symbol: 'OLDNAME', high: 400, low: 300, close: 400, date: '2026-09-25' }),
     equity({ symbol: 'OTHER', isin: 'INE000B01001', high: 650, low: 600, close: 620, date: '2026-09-25' }),
   ];
   const current = [
-    equity({ high: 500, low: 200, close: 400 }),
+    equity({ high: 500, low: 200, close: 450 }),
     equity({ symbol: 'OTHER', isin: 'INE000B01001', high: 600, low: 550, close: 570 }),
   ];
   const found = screen({ current, baseline: '2026-09-25', days: [base, current] }, loadScreeningConfig({}));
   assert.equal(found.length, 1);
   assert.deepEqual(found.map(c => [c.symbol, c.group, c.threshold, c.change]),
-    [['EXAMPLE', 'gainers', 100, 100]]);
+    [['EXAMPLE', 'gainers', 5, 100]]);
   assert.equal(found[0]!.changePercent, 25);
   assert.equal(found[0]!.volumeRatio, 1);
 });
 
-test('rupee thresholds use integer paise, avoiding floating-point boundary exclusion', () => {
-  const base = equity({ close: 100.1, high: 100.2, low: 100, date: '2026-09-25' });
-  const latest = equity({ close: 200.1, high: 200.2, low: 200 });
+test('percentage thresholds screen stocks meeting minimum gain', () => {
+  const base = equity({ close: 400.1, high: 400, low: 390, date: '2026-09-25' });
+  const latest = equity({ close: 500.1, high: 500, low: 480 });
   const found = screen({ current: [latest], baseline: base.date, days: [[base], [latest]] }, loadScreeningConfig({}));
   assert.equal(found.length, 1);
-  assert.equal(found[0]!.threshold, 100);
+  assert.equal(found[0]!.threshold, 5);
   assert.equal(found[0]!.change, 100);
 });
 
 test('separate price ranges and configurable thresholds apply per group, with no fallback', () => {
   const settings = loadScreeningConfig({
-    GAINERS_INCREASE_RS: '125.25', LOSERS_DECREASE_RS: '75.5',
-    GAINERS_MIN_PRICE: '300', GAINERS_MAX_PRICE: '2100',
-    LOSERS_MIN_PRICE: '200', LOSERS_MAX_PRICE: '1500',
+    GAINERS_INCREASE_PCT: '12.5', LOSERS_DECREASE_PCT: '7.5',
+    GAINERS_MIN_PRICE: '400', GAINERS_MAX_PRICE: '2100',
+    LOSERS_MIN_PRICE: '400', LOSERS_MAX_PRICE: '1500',
   });
   const make = (close: number, high: number, low: number, rules = settings) => {
     const current = [equity({ close, high, low })];
     const base = [equity({ date: '2026-09-25', close: 1700, high: 1800, low: 1600 })];
     return screen({ current, baseline: '2026-09-25', days: [base, current] }, rules);
   };
-  assert.deepEqual(make(1500, 1925.25, 1500).map(c => [c.group, c.threshold]), [['gainers', 125.25]]);
-  assert.deepEqual(make(1600, 1925.25, 1500).map(c => c.group), ['gainers']);
-  assert.equal(make(1550, 1925.24, 1524.51, {
+  assert.deepEqual(make(1500, 2070, 1500).map(c => [c.group, c.threshold]), [['gainers', 12.5]]);
+  assert.deepEqual(make(1600, 2070, 1500).map(c => c.group), ['gainers']);
+  assert.equal(make(1550, 1900, 1524.51, {
     ...settings, losers: { ...settings.losers, maxPrice: 1600 },
   }).length, 0);
 });
@@ -117,15 +117,15 @@ test('screening env validates values and both range bounds', () => {
   const defaults = loadScreeningConfig({});
   assert.deepEqual(defaults, {
     lookbackDays: 30,
-    gainers: { threshold: 100, minPrice: 200, maxPrice: 2000 },
-    losers: { threshold: 100, minPrice: 200, maxPrice: 1500 },
+    gainers: { threshold: 5, minPrice: 400, maxPrice: 2000 },
+    losers: { threshold: 5, minPrice: 400, maxPrice: 1500 },
   });
   assert.equal(loadScreeningConfig({ LOOKBACK_DAYS: '10' }).lookbackDays, 10);
   for (const invalid of ['0', '-1', '1.5', '', 'NaN']) {
     assert.throws(() => loadScreeningConfig({ LOOKBACK_DAYS: invalid }));
   }
-  for (const invalid of ['0', '-1', '', 'NaN', 'Infinity', '0.001']) {
-    assert.throws(() => loadScreeningConfig({ GAINERS_INCREASE_RS: invalid }));
+  for (const invalid of ['0', '-1', '', 'NaN', 'Infinity']) {
+    assert.throws(() => loadScreeningConfig({ GAINERS_INCREASE_PCT: invalid }));
   }
   assert.throws(() => loadScreeningConfig({ LOSERS_MIN_PRICE: '1600', LOSERS_MAX_PRICE: '1500' }));
   assert.deepEqual(shortlist([]), { gainers: [], losers: [] });
@@ -144,7 +144,7 @@ test('history filters latest price only, reuses raw cache and probes weekend bas
       const weekday = dateValue(date).getUTCDay();
       if (weekday === 0 || weekday === 6) return new Response('', { status: 404 });
       return zipResponse(csv(date, [
-        equity({ date, close: date === '2026-03-31' ? 200 : 150, high: 220, low: 100 }),
+        equity({ date, close: date === '2026-03-31' ? 500 : 450, high: 520, low: 400 }),
         equity({ date, symbol: 'OUT', isin: 'INE000B01001', close: 2001, high: 2100, low: 1900 }),
       ]));
     };
@@ -154,7 +154,7 @@ test('history filters latest price only, reuses raw cache and probes weekend bas
     assert.ok(!store.missingDates.includes('2026-02-28'), '30 days before March 31 is March 1, not February 28');
     assert.ok(store.missingDates.includes('2026-03-01'));
     assert.equal(history.current.length, 1);
-    assert.equal(history.days[0]![0]!.close, 150);
+    assert.equal(history.days[0]![0]!.close, 450);
     assert.ok(history.days.every(day => day.length === 1));
     assert.ok(store.downloads <= 31);
     const previous = calls;
@@ -267,17 +267,17 @@ test('a run downloads exactly 31 files at most, but can still read cached files 
   } finally { await rm(root, { recursive: true }); }
 });
 
-test('retention removes only recognized files older than two calendar months', async () => {
+test('retention removes only recognized files older than 45 days', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'nse-prune-'));
   try {
     await initializeStorage(root);
-    await Promise.all(['2026-08-26.csv', '2026-08-26.csv.abcd.tmp', '2026-08-27.csv', 'notes.txt'].map(file =>
+    await Promise.all(['2026-09-11.csv', '2026-09-11.csv.abcd.tmp', '2026-09-12.csv', 'notes.txt'].map(file =>
       writeFile(path.join(root, 'bhav', file), 'test')));
-    await Promise.all(['2026-08-26.pe.csv', '2026-08-26.pr.zip', '2026-08-26.pe.csv.abcd.tmp',
-      '2026-08-27.pe.csv', '2026-08-27.pr.zip', 'notes.txt'].map(file =>
+    await Promise.all(['2026-09-11.pe.csv', '2026-09-11.pr.zip', '2026-09-11.pe.csv.abcd.tmp',
+      '2026-09-12.pe.csv', '2026-09-12.pr.zip', 'notes.txt'].map(file =>
       writeFile(path.join(root, 'nse', file), 'test')));
     await prune(root, '2026-10-27');
-    assert.deepEqual((await readdir(path.join(root, 'bhav'))).sort(), ['2026-08-27.csv', 'notes.txt']);
-    assert.deepEqual((await readdir(path.join(root, 'nse'))).sort(), ['2026-08-27.pe.csv', '2026-08-27.pr.zip', 'notes.txt']);
+    assert.deepEqual((await readdir(path.join(root, 'bhav'))).sort(), ['2026-09-12.csv', 'notes.txt']);
+    assert.deepEqual((await readdir(path.join(root, 'nse'))).sort(), ['2026-09-12.pe.csv', '2026-09-12.pr.zip', 'notes.txt']);
   } finally { await rm(root, { recursive: true }); }
 });

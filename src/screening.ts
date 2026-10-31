@@ -6,13 +6,14 @@ const rupees = z.coerce.number().finite().positive().refine(
   value => Math.abs(value * 100 - Math.round(value * 100)) < 0.000001,
   'Use amounts with at most two decimal places',
 );
+const percent = z.coerce.number().finite().positive();
 const envSchema = z.object({
   LOOKBACK_DAYS: z.coerce.number().int().safe().positive().default(30),
-  GAINERS_INCREASE_RS: rupees.default(100),
-  LOSERS_DECREASE_RS: rupees.default(100),
-  GAINERS_MIN_PRICE: rupees.default(200),
+  GAINERS_INCREASE_PCT: percent.default(5),
+  LOSERS_DECREASE_PCT: percent.default(5),
+  GAINERS_MIN_PRICE: rupees.default(400),
   GAINERS_MAX_PRICE: rupees.default(2000),
-  LOSERS_MIN_PRICE: rupees.default(200),
+  LOSERS_MIN_PRICE: rupees.default(400),
   LOSERS_MAX_PRICE: rupees.default(1500),
 }).superRefine((env, context) => {
   for (const group of ['GAINERS', 'LOSERS'] as const) {
@@ -49,8 +50,8 @@ export function loadScreeningConfig(env?: Record<string, string | undefined>): S
   const parsed = envSchema.parse(env);
   return {
     lookbackDays: parsed.LOOKBACK_DAYS,
-    gainers: { threshold: parsed.GAINERS_INCREASE_RS, minPrice: parsed.GAINERS_MIN_PRICE, maxPrice: parsed.GAINERS_MAX_PRICE },
-    losers: { threshold: parsed.LOSERS_DECREASE_RS, minPrice: parsed.LOSERS_MIN_PRICE, maxPrice: parsed.LOSERS_MAX_PRICE },
+    gainers: { threshold: parsed.GAINERS_INCREASE_PCT, minPrice: parsed.GAINERS_MIN_PRICE, maxPrice: parsed.GAINERS_MAX_PRICE },
+    losers: { threshold: parsed.LOSERS_DECREASE_PCT, minPrice: parsed.LOSERS_MIN_PRICE, maxPrice: parsed.LOSERS_MAX_PRICE },
   };
 }
 

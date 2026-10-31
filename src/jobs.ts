@@ -34,7 +34,7 @@ export interface Job {
     classificationReason: string; dataGapReason: string | null;
     warnings: ResearchWarning[]; failure?: { name: string; message: string };
     group: Candidate['group']; cache?: ResearchResult['cache']; report?: ReportReference;
-    nse?: Candidate['nse'];
+    nse?: Candidate['nse']; rank?: number; totalPassing?: number;
   }[];
   results?: { gainers: RankedStock[]; losers: RankedStock[] };
   inserted?: { gainers: number; losers: number };
@@ -177,14 +177,14 @@ export class Jobs {
       const researcher = withResearchCache(
         this.deps.root, job.settings.lookbackDays, job.id, this.deps.researcher(job.id),
       );
-      const results = await selectStocks(candidates, researcher, async (candidate, research) => {
+      const results = await selectStocks(candidates, researcher, async (candidate, research, stock) => {
         console.log(JSON.stringify({
           event: 'stock_assessment', runId: job.id, symbol: candidate.symbol,
           group: candidate.group, profitProbability: research.assessment.profitProbability,
           reasons: research.assessment.reasons, risks: research.assessment.risks,
           classificationReason: research.assessment.classificationReason, dataGapReason: research.assessment.dataGapReason,
           warnings: research.assessment.warnings ?? [], failure: research.failure,
-          cache: research.cache,
+          cache: research.cache, rank: stock.rank, totalPassing: stock.totalPassing,
         }));
         job.stockOutcomes!.push({
           symbol: candidate.symbol, isin: candidate.isin, price: candidate.price, priceAsOf: candidate.asOfDate,
@@ -192,6 +192,7 @@ export class Jobs {
           classificationReason: research.assessment.classificationReason, dataGapReason: research.assessment.dataGapReason,
           warnings: research.assessment.warnings ?? [], failure: research.failure,
           group: candidate.group, cache: research.cache, nse: candidate.nse,
+          rank: stock.rank, totalPassing: stock.totalPassing,
         });
         await this.save(job);
       }, job.id);
@@ -216,7 +217,7 @@ export class Jobs {
       job.phase = 'reporting';
       await this.save(job);
       const stocks = [...results.gainers, ...results.losers];
-      const requestedPoints = Math.min(5, job.settings.lookbackDays);
+      const requestedPoints = 10;
       const prices = await store.chartPrices(history, stocks.map(stock => stock.candidate), requestedPoints);
       job.downloads = store.downloads;
       job.missingDates = store.missingDates;

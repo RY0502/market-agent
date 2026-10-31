@@ -64,7 +64,7 @@ export function zipResponse(text: string): Response {
 export function candidate(overrides: Partial<Candidate> = {}): Candidate {
   return {
     symbol: 'EXAMPLE', isin: 'INE000A01001', name: 'Example Limited',
-    group: 'gainers', threshold: 100, minPrice: 200, maxPrice: 2000, price: 500, change: 120, changePercent: 30,
+    group: 'gainers', threshold: 5, minPrice: 400, maxPrice: 2000, price: 500, change: 120, changePercent: 30,
     asOfDate: '2026-10-26', baselineDate: '2026-09-25',
     averageVolume: 100_000, averageTurnover: 50_000_000,
     volumeRatio: 1.5, volatility: 0.2, observations: 21, ...overrides,

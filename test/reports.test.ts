@@ -54,7 +54,7 @@ test('responsive script-free HTML escapes all narrative content, preserves Unsur
   ]) {
     const html = render(item, points);
     assert.match(html, /name="viewport"/);
-    assert.match(html, /viewBox="0 0 400 235"/);
+    assert.match(html, /viewBox="0 0 460 250"/);
     assert.match(html, />Unsure</);
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
     assert.match(html, /&lt;script&gt;/);
@@ -64,7 +64,7 @@ test('responsive script-free HTML escapes all narrative content, preserves Unsur
   assert.match(render(item, [], 2), /No daily closing-price observations/);
   assert.throws(() => render(item, [{ date: '2026-10-26', close: NaN }]), /Invalid report price/);
   assert.throws(() => render(item, [{ date: '2026-10-27', close: 500 }]), /chart dates/);
-  assert.throws(() => render(item, [], 6), /chart length/);
+  assert.throws(() => render(item, [], 11), /chart length/);
 });
 
 test('report keys distinguish run, group and encoded NSE symbols and reject unsafe identities/origins', () => {
@@ -102,4 +102,16 @@ test('Worker verification and upload validate responses and propagate failures w
   assert.equal(requests, 2);
   await assert.rejects(verifyReportHosting(config, async () => Response.json({ retentionDays: 30 })));
   await assert.rejects(createReporter(config, async () => Response.json({ path: 'wrong', expiresAt: 'wrong' }))(stock(), runId, [], 5));
+});
+
+test('stock rank is displayed with total passing count in header badge and cards grid', () => {
+  const item100 = { ...stock(), rank: 14, totalPassing: 100 };
+  const html100 = render(item100);
+  assert.match(html100, /Rank #14 of 100/);
+  assert.match(html100, /Top 14 of 100 passing/);
+
+  const item23 = { ...stock(), rank: 12, totalPassing: 23 };
+  const html23 = render(item23);
+  assert.match(html23, /Rank #12 of 23/);
+  assert.match(html23, /Top 12 of 23 passing/);
 });

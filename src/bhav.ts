@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { parse } from 'csv-parse/sync';
 import { unzipSync, strFromU8 } from 'fflate';
-import { addDays, dateValue, monthsBefore } from './dates.js';
+import { addDays, dateValue } from './dates.js';
 import { atomicWrite, readOptional } from './storage.js';
 import { ACTIVE_GROUPS, loadScreeningConfig, SHORTLIST_SIZE, withinPrice, type ScreeningConfig } from './screening.js';
 import type { NseFundamentals } from './nse-fundamentals.js';
@@ -152,28 +152,38 @@ export class BhavStore {
     const current = (await this.load(date)).filter(row =>
       ACTIVE_GROUPS.some(group => withinPrice(row.close, settings[group])));
     const ids = new Set(current.map(row => row.isin));
-    const target = addDays(date, -settings.lookbackDays);
-    let baseline: string | undefined;
-    let baseRows: Equity[] = [];
+    // Always download 30 days back regardless of screening lookbackDays.
+    const downloadDays = 30;
+    const downloadTarget = addDays(date, -downloadDays);
+    const screenTarget = addDays(date, -settings.lookbackDays);
+    const target = downloadTarget < screenTarget ? downloadTarget : screenTarget;
+    const loadedDays = new Map<string, Equity[]>();
     for (let day = target; day < date; day = addDays(day, 1)) {
       try {
-        baseRows = await this.load(day);
-        baseline = day;
-        break;
+        const rows = await this.load(day);
+        loadedDays.set(day, rows);
       } catch (error) {
         if (!(error instanceof MissingBhavcopy)) throw error;
       }
     }
+    // Find the screening baseline: first trading day on or after screenTarget
+    let baseline: string | undefined;
+    for (const [day] of loadedDays) {
+      if (day >= screenTarget) {
+        baseline = day;
+        break;
+      }
+    }
+    if (!baseline && loadedDays.size > 0) {
+      baseline = [...loadedDays.keys()][0];
+    }
     if (!baseline) throw new UnavailableHistory(`No historical bhavcopy available on or after ${target} and before ${date}; ${settings.lookbackDays}-day comparison skipped`);
-    const days = [baseRows.filter(row => ids.has(row.isin))];
-    const dates = [baseline];
-    for (let day = addDays(baseline, 1); day < date; day = addDays(day, 1)) {
-      // Weekends can contain special NSE sessions, so probe them too.
-      try {
-        days.push((await this.load(day)).filter(row => ids.has(row.isin)));
+    const days: Equity[][] = [];
+    const dates: string[] = [];
+    for (const [day, rows] of loadedDays) {
+      if (day >= baseline) {
+        days.push(rows.filter(row => ids.has(row.isin)));
         dates.push(day);
-      } catch (error) {
-        if (!(error instanceof MissingBhavcopy)) throw error;
       }
     }
     days.push(current);
@@ -183,7 +193,7 @@ export class BhavStore {
   }
 
   async chartPrices(history: BhavHistory, candidates: Candidate[], count: number): Promise<Map<string, PricePoint[]>> {
-    if (!Number.isInteger(count) || count < 1 || count > 5) throw new Error('Chart requires between one and five trading observations');
+    if (!Number.isInteger(count) || count < 1 || count > 10) throw new Error('Chart requires between one and ten trading observations');
     const series = new Map(candidates.map(candidate => [candidate.isin, new Map<string, number>()]));
     const collect = (rows: Equity[]) => {
       for (const row of rows) series.get(row.isin)?.set(row.date, row.close);
@@ -191,7 +201,7 @@ export class BhavStore {
     for (const rows of history.days) collect(rows);
     const date = history.current[0]?.date;
     if (date && series.size) {
-      const cutoff = monthsBefore(date, 2);
+      const cutoff = addDays(date, -45);
       for (let day = addDays(history.baseline, -1);
         day >= cutoff && [...series.values()].some(points => points.size < count);
         day = addDays(day, -1)) {
@@ -240,13 +250,14 @@ export function screen(
       const change = group === 'gainers'
         ? (Math.round(current.high * 100) - Math.round(base.high * 100)) / 100
         : (Math.round(current.low * 100) - Math.round(base.low * 100)) / 100;
-      const magnitude = group === 'gainers' ? change : -change;
-      if (Math.round(magnitude * 100) < Math.round(rule.threshold * 100) || averageVolume <= 0) continue;
+      const changePercent = change / (group === 'gainers' ? base.high : base.low) * 100;
+      const magnitudePercent = group === 'gainers' ? changePercent : -changePercent;
+      if (magnitudePercent < rule.threshold || averageVolume <= 0) continue;
       candidates.push({
         symbol: current.symbol, isin: current.isin, name: current.name, group,
         threshold: rule.threshold, minPrice: rule.minPrice, maxPrice: rule.maxPrice, price: current.close,
         change,
-        changePercent: change / (group === 'gainers' ? base.high : base.low) * 100,
+        changePercent,
         baselineDate: history.baseline, asOfDate: current.date,
         averageVolume, averageTurnover, volumeRatio: current.volume / averageVolume,
         volatility, observations: samples.length,
@@ -258,7 +269,7 @@ export function screen(
 
 export function shortlist(candidates: Candidate[]): { gainers: Candidate[]; losers: Candidate[] } {
   const order = (group: Candidate['group']) => candidates.filter(candidate => ACTIVE_GROUPS.includes(group) && candidate.group === group)
-    .sort((a, b) => (group === 'gainers' ? b.change - a.change : a.change - b.change) ||
+    .sort((a, b) => (group === 'gainers' ? b.changePercent - a.changePercent : a.changePercent - b.changePercent) ||
       a.symbol.localeCompare(b.symbol) || a.isin.localeCompare(b.isin))
     .slice(0, SHORTLIST_SIZE);
   return { gainers: order('gainers'), losers: order('losers') };

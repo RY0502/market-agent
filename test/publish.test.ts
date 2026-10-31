@@ -65,6 +65,13 @@ for (const [gainers, losers] of [[99, 99], [100, 99], [99, 100], [101, 126]]) {
         assert.equal(table, 'top_gainers', 'Paused losers must not be queried, cleaned or inserted');
         const method = init?.method ?? 'GET';
         assert.ok(table in counts, 'No custom RPC or intermediate tables');
+        if (method === 'POST') {
+          const rows = JSON.parse(String(init?.body)) as Record<string, unknown>[];
+          for (const row of rows) assert.deepEqual(Object.keys(row).sort(), displayKeys);
+          counts[table]! += rows.length;
+          inserted.push(table);
+          return new Response(null, { status: 201 });
+        }
         if (method === 'GET' && url.searchParams.get('limit') === '1') {
           assert.equal(url.searchParams.get('select'), 'id');
           assert.equal(new Headers(init?.headers).get('prefer'), 'count=exact');
@@ -72,28 +79,25 @@ for (const [gainers, losers] of [[99, 99], [100, 99], [99, 100], [101, 126]]) {
         }
         if (method === 'GET') {
           assert.equal(url.searchParams.get('order'), 'updated_at.asc.nullsfirst,id.asc');
-          assert.equal(url.searchParams.get('limit'), '25');
-          return Response.json(Array.from({ length: 25 }, (_, i) => ({ id: i + 1 })));
+          const expectedLimit = counts[table]! - 100;
+          assert.equal(url.searchParams.get('limit'), String(expectedLimit));
+          return Response.json(Array.from({ length: expectedLimit }, (_, i) => ({ id: i + 1 })));
         }
         if (method === 'DELETE') {
-          assert.equal(url.searchParams.get('id'), `in.(${Array.from({ length: 25 }, (_, i) => i + 1).join(',')})`);
+          const expectedDelete = counts[table]! - 100;
+          assert.equal(url.searchParams.get('id'), `in.(${Array.from({ length: expectedDelete }, (_, i) => i + 1).join(',')})`);
           deleted.push(table);
-          counts[table]! -= 25;
+          counts[table]! -= expectedDelete;
           return new Response(null, { status: 204 });
         }
-        assert.equal(method, 'POST');
-        const rows = JSON.parse(String(init?.body)) as Record<string, unknown>[];
-        for (const row of rows) assert.deepEqual(Object.keys(row).sort(), displayKeys);
-        counts[table]! += rows.length;
-        inserted.push(table);
-        return new Response(null, { status: 201 });
+        throw new Error(`Unexpected request: ${method} ${url}`);
       };
       const publish = createPublisher('https://example.supabase.co', 'test-key', root, request);
       await publish({ gainers: Array.from({ length: 25 }, stock), losers: Array.from({ length: 25 }, stock) }, 'run');
       assert.deepEqual(deleted, Object.entries({ top_gainers: gainers! })
-        .filter(([, count]) => count >= 100).map(([table]) => table));
+        .filter(([, count]) => count + 25 > 100).map(([table]) => table));
       assert.deepEqual(inserted, ['top_gainers']);
-      assert.equal(counts.top_gainers, gainers! - (gainers! >= 100 ? 25 : 0) + 25);
+      assert.equal(counts.top_gainers, Math.min(100, gainers! + 25));
       assert.equal(counts.top_losers, losers!);
       const progress = JSON.parse(await readFile(publicationFile(root, 'run'), 'utf8'));
       assert.equal(progress.tables.top_losers.phase, 'paused');
@@ -172,11 +176,11 @@ for (const [name, response, expected] of [
         return response();
       };
       const publish = createPublisher('https://example.supabase.co', 'test-key', root, request);
-      await assert.rejects(publish({ gainers: [stock()], losers: [] }, 'count-error'), expected);
+      await assert.rejects(publish({ gainers: [], losers: [] }, 'count-error'), expected);
       assert.equal(calls, 1);
       const progress = JSON.parse(await readFile(publicationFile(root, 'count-error'), 'utf8'));
       assert.equal(progress.tables.top_gainers.phase, 'pending');
-      await assert.rejects(publish({ gainers: [stock()], losers: [] }, 'count-error'), /already exists/);
+      await assert.rejects(publish({ gainers: [], losers: [] }, 'count-error'), /already exists/);
       assert.equal(calls, 1);
     } finally { await rm(root, { recursive: true }); }
   });

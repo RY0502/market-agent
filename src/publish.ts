@@ -68,6 +68,14 @@ export function createPublisher(url: string, key: string, root: string, request:
     await save();
     for (const table of ACTIVE_GROUPS.map(group => group === 'gainers' ? 'top_gainers' : 'top_losers')) {
       const state = progress.tables[table];
+      if (state.rows.length) {
+        state.phase = 'insert_started';
+        await save();
+        const insertResponse = await client.from(table).insert(state.rows);
+        if (insertResponse.error) throw new Error(`Supabase insert failed or has an uncertain outcome for ${table}; inspect disk progress and database rows before retrying: ${failureDetails(insertResponse)}`);
+        state.phase = 'inserted';
+        await save();
+      }
       const countResponse = await client.from(table).select('id', { count: 'exact' }).limit(1);
       const { count, error: countError } = countResponse;
       if (countError || count === null || !Number.isSafeInteger(count) || count < 0) {
@@ -75,26 +83,19 @@ export function createPublisher(url: string, key: string, root: string, request:
           countResponse, countError ? 'Empty error response' : 'Missing or invalid exact row count',
         )}`);
       }
-      if (count >= 100) {
+      if (count > 100) {
+        const excess = count - 100;
         const oldestResponse = await client.from(table).select('id')
-            .order('updated_at', { ascending: true, nullsFirst: true }).order('id', { ascending: true }).limit(25);
+            .order('updated_at', { ascending: true, nullsFirst: true }).order('id', { ascending: true }).limit(excess);
         const { data, error } = oldestResponse;
         if (error) throw new Error(`Supabase oldest-row lookup failed for ${table}: ${failureDetails(oldestResponse)}`);
-        const rows = z.array(z.object({ id: z.union([z.number().int().safe(), z.string().regex(/^\d+$/)]) })).length(25).parse(data);
+        const rows = z.array(z.object({ id: z.union([z.number().int().safe(), z.string().regex(/^\d+$/)]) })).length(excess).parse(data);
         state.phase = 'cleanup_started';
         await save();
         const deleteResponse = await client.from(table).delete().in('id', rows.map(row => row.id));
         if (deleteResponse.error) throw new Error(`Supabase cleanup failed for ${table}; inspect disk progress before retrying: ${failureDetails(deleteResponse)}`);
       }
       state.phase = 'cleanup_done';
-      await save();
-      if (state.rows.length) {
-        state.phase = 'insert_started';
-        await save();
-        const insertResponse = await client.from(table).insert(state.rows);
-        if (insertResponse.error) throw new Error(`Supabase insert failed or has an uncertain outcome for ${table}; inspect disk progress and database rows before retrying: ${failureDetails(insertResponse)}`);
-      }
-      state.phase = 'inserted';
       await save();
     }
   };

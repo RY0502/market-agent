@@ -20,9 +20,9 @@ const cacheSchema = z.object({
   }),
 }).refine(record => record.baselineDate < record.asOfDate, 'Research cache comparison window is invalid');
 
-/** Background reuse lasts half the lookback window, capped at seven days for longer windows. */
-export function cacheReuseDays(lookbackDays: number): number {
-  return lookbackDays > 7 ? 7 : lookbackDays / 2;
+/** Background reuse always lasts five days. */
+export function cacheReuseDays(_lookbackDays?: number): number {
+  return 5;
 }
 
 export function withResearchCache(

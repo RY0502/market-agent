@@ -31,7 +31,7 @@ for (const lookback of [2, 3, 30]) {
         assert.equal(enriched, reports);
         assert.equal(stock.research.assessment.profitProbability, 'medium');
         if (failUpload) throw new Error('Cloudflare upload unavailable');
-        assert.equal(count, Math.min(5, lookback));
+        assert.equal(count, 10);
         assert.equal(prices.length, count);
         assert.equal(prices.at(-1)!.date, date);
         return reportReference(stock.candidate.symbol, runId);

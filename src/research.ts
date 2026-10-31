@@ -856,6 +856,7 @@ export interface RankedStock {
   riskScore: number | null;
   recoveryScore: number | null;
   rank: number;
+  totalPassing?: number;
   report?: { url: string; expiresAt: string };
 }
 
@@ -899,6 +900,7 @@ export async function selectStocks(
   const selected = shortlist(candidates);
   z.number().int().min(1).max(25).parse(concurrency);
   for (const group of ACTIVE_GROUPS) {
+    const totalPassing = candidates.filter(c => c.group === group).length;
     for (let offset = 0; offset < selected[group].length; offset += concurrency) {
       const settled = await Promise.allSettled(selected[group].slice(offset, offset + concurrency).map(async (candidate, index) => {
         let research: ResearchResult;
@@ -921,6 +923,7 @@ export async function selectStocks(
           candidate, research,
           riskScore: risk === null ? null : Math.round((observedRisk * 0.4 + risk * 0.6) * 100) / 100,
           recoveryScore: research.assessment.recoveryScore, rank: offset + index + 1,
+          totalPassing,
         };
         return stock;
       }));

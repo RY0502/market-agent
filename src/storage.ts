@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { monthsBefore } from './dates.js';
+import { addDays } from './dates.js';
 
 export async function atomicWrite(file: string, contents: string | Uint8Array): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
@@ -45,7 +45,7 @@ export async function cleanupRun(root: string, date: string, runId: string): Pro
 }
 
 export async function prune(root: string, today: string): Promise<void> {
-  const cutoff = monthsBefore(today, 2);
+  const cutoff = addDays(today, -45);
   for (const dir of ['bhav', 'nse']) {
     for (const entry of await readdir(path.join(root, dir), { withFileTypes: true })) {
       const match = /^(\d{4}-\d{2}-\d{2})(?:\.[a-zA-Z0-9-]+)*\.(?:csv|zip|json|jsonl|tmp)$/.exec(entry.name);

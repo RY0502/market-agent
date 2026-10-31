@@ -8,14 +8,14 @@ import { LiveEvidence, resolveSubmission, submissionExamples, validateAssessment
 import { candidate, research } from './helpers.js';
 import { cleanupRun, initializeStorage } from '../src/storage.js';
 
-test('cache reuse is half the window up to seven days, then capped at seven days', () => {
-  assert.equal(cacheReuseDays(2), 1);
-  assert.equal(cacheReuseDays(7), 3.5);
-  assert.equal(cacheReuseDays(10), 7);
-  assert.equal(cacheReuseDays(30), 7);
+test('cache reuse is always five days regardless of lookback window', () => {
+  assert.equal(cacheReuseDays(2), 5);
+  assert.equal(cacheReuseDays(7), 5);
+  assert.equal(cacheReuseDays(10), 5);
+  assert.equal(cacheReuseDays(30), 5);
 });
 
-test('background cache reuses the capped window without extending it and still refreshes every assessment', async () => {
+test('background cache reuses the 5-day window without extending it and still refreshes every assessment', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'research-cache-'));
   let time = Date.now() + 1000;
   const createdAt = time;
@@ -30,7 +30,7 @@ test('background cache reuses the capped window without extending it and still r
     await initializeStorage(root);
     const fresh = await researcher(candidate());
     assert.deepEqual(fresh.cache, { hit: false, backgroundResearchedAt: undefined, validUntil: undefined });
-    time += 6 * 86_400_000;
+    time += 4 * 86_400_000;
     const refreshed = await researcher(candidate());
     assert.equal(refreshed.cache!.hit, true);
     assert.equal(refreshed.cache!.backgroundResearchedAt, new Date(createdAt).toISOString());
@@ -39,7 +39,7 @@ test('background cache reuses the capped window without extending it and still r
     assert.equal(JSON.parse(await readFile(file, 'utf8')).result.researchedAt, new Date(createdAt).toISOString());
     await cleanupRun(root, candidate().asOfDate, 'run');
     assert.ok(await readFile(file));
-    time += 86_400_000;
+    time += 2 * 86_400_000;
     await researcher(candidate());
     assert.deepEqual(hit, [false, true, false]);
     const shorter = withResearchCache(root, 2, 'next', async (_c, cached) => {

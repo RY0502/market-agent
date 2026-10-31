@@ -217,14 +217,14 @@ test('each new run snapshots fresh screening settings and reuses cached files wi
     await seed(root);
     const first = await jobs.start();
     await jobs.wait();
-    settings = loadScreeningConfig({ GAINERS_INCREASE_RS: '300', LOSERS_DECREASE_RS: '400' });
+    settings = loadScreeningConfig({ GAINERS_INCREASE_PCT: '70', LOSERS_DECREASE_PCT: '80' });
     const second = await jobs.start();
     await jobs.wait();
     assert.deepEqual(counts, [1, 0]);
     assert.equal(researched, 1);
     assert.equal(resets, 2);
-    assert.equal((await jobs.get(first.id))!.settings.gainers.threshold, 100);
-    assert.equal((await jobs.get(second.id))!.settings.gainers.threshold, 300);
+    assert.equal((await jobs.get(first.id))!.settings.gainers.threshold, 5);
+    assert.equal((await jobs.get(second.id))!.settings.gainers.threshold, 70);
     assert.equal((await jobs.get(second.id))!.downloads, 0);
   } finally { await rm(root, { recursive: true }); }
 });
