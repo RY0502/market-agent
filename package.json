@@ -16,7 +16,8 @@
     "test": "tsx --test test/*.test.ts",
     "test:bhav": "tsx src/verify-bhav.ts",
     "db:setup": "tsx src/setup.ts",
-    "reports:setup": "tsx src/setup-reports.ts"
+    "reports:setup": "tsx src/setup-reports.ts",
+    "reports:purge": "tsx src/purge-reports.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.0.0",

@@ -5,7 +5,7 @@ import { Jobs } from './jobs.js';
 import { createResearcher } from './research.js';
 import { createPublisher } from './publish.js';
 import { resetFrameworkState } from './neon.js';
-import { createReporter, verifyReportHosting } from './report-storage.js';
+import { createReporter, purgeReportStorage, verifyReportHosting } from './report-storage.js';
 import { enrichStocks } from './tradingview.js';
 
 const config = loadConfig();
@@ -19,6 +19,7 @@ const jobs = new Jobs({
   resetFrameworkState: () => resetFrameworkState(db),
   publish: createPublisher(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, config.DATA_DIR),
   report: createReporter(config),
+  purgeReports: () => purgeReportStorage(config).then(() => {}),
 });
 await jobs.initialize();
 const server = createHttpServer(jobs);

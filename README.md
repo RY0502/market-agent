@@ -46,9 +46,10 @@ The URL must be an HTTPS origin without a path, credentials, query or fragment. 
 
 ```sh
 npm run reports:setup
+npm run reports:purge
 ```
 
-This verifies the authenticated Worker health endpoint, KV binding, and five-day retention contract without changing Cloudflare resources. Startup performs the same check and fails explicitly on configuration or connectivity errors. Uploads require the secret; viewing a report is public. Do not share the upload token with your consuming app.
+This verifies the authenticated Worker health endpoint, KV binding, and five-day retention contract without changing Cloudflare resources. Running `npm run reports:purge` purges all report entries from the KV namespace and invalidates the edge cache so that only fresh reports are served. Research runs also automatically invoke purge before uploading new reports. Startup performs the health check and fails explicitly on configuration or connectivity errors. Uploads require the secret; viewing a report is public. Do not share the upload token with your consuming app.
 
 **Five-day expiry and cleanup:** each upload sets KV's native absolute expiration to five days after report creation. Cloudflare automatically removes expired entries, independently of research runs or server uptime; no cron, listing, or manual deletion is required. The Worker also checks expiry metadata on every read, including edge-cache hits, so a lingering cached copy cannot extend hosted access. Expired URLs return 404 or 410. Previously downloaded files or pages already open in an app cannot be recalled.
 

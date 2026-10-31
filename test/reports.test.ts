@@ -153,3 +153,11 @@ test('detectFirstSpikeIndex detects the first >=5% gain session and renders labe
   assert.doesNotMatch(flatHtml, /First ≥5% single-day spike/);
 });
 
+test('report clearly explains that gain graph is high to high values and LTP prices list is closing price', () => {
+  const html = render(stock(), [{ date: '2026-10-26', close: 500 }], 5);
+  assert.match(html, /gain graph is high to high values of the stock/i);
+  assert.match(html, /LTP prices list is the closing price value of the stock on each day/i);
+  assert.match(html, /LTP prices list \(daily closing values\)/);
+});
+
+

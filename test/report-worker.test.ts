@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleReportRequest, type ReportEnvironment, type ReportNamespace } from '../cloudflare/worker.js';
-import { createReporter, reportLocation, verifyReportHosting } from '../src/report-storage.js';
+import { createReporter, purgeReportStorage, reportLocation, verifyReportHosting } from '../src/report-storage.js';
 import { REPORT_LIFETIME_MS, reportHeaders } from '../src/report-policy.js';
 import { candidate, research } from './helpers.js';
 import type { RankedStock } from '../src/research.js';
@@ -29,6 +29,16 @@ function harness() {
     async put(key, value, options) {
       writes++;
       stored.set(key, { value, ...options });
+    },
+    async delete(key: string) {
+      stored.delete(key);
+    },
+    async list(options) {
+      const prefix = options?.prefix ?? '';
+      const keys = [...stored.keys()]
+        .filter(k => k.startsWith(prefix))
+        .map(name => ({ name }));
+      return { keys, list_complete: true };
     },
   };
   const env: ReportEnvironment = { REPORTS: namespace, REPORT_UPLOAD_TOKEN: config.CLOUDFLARE_REPORT_UPLOAD_TOKEN };
@@ -139,3 +149,55 @@ test('KV errors propagate to the uploader and do not produce report references',
   await assert.rejects(createReporter(config, h.request, () => createdAt)(stock(), runId, [], 5), /KV write unavailable/);
   assert.equal(h.stored.size, 0);
 });
+
+test('purge endpoint requires authorization and purges all pages from KV and edge cache', async () => {
+  const h = harness();
+  const unauthed = await h.request(`${config.CLOUDFLARE_REPORT_URL}/stock-report-purge`, { method: 'POST' });
+  assert.equal(unauthed.status, 401);
+
+  // Upload two reports
+  const r1 = payload();
+  const r2 = { ...payload(), path: reportLocation(config, runId, 'gainers', 'INFY').key };
+  assert.equal((await upload(h, r1)).status, 200);
+  assert.equal((await upload(h, r2)).status, 200);
+  assert.equal(h.stored.size, 2);
+
+  // Visit r1 to populate edge cache
+  const url1 = `${config.CLOUDFLARE_REPORT_URL}/${r1.path}`;
+  assert.equal((await h.request(url1)).status, 200);
+  await Promise.all(h.pending);
+  assert.equal(h.cached.size, 1);
+
+  // Purge all reports using purgeReportStorage
+  const res = await purgeReportStorage(config, h.request);
+  assert.equal(res.purged, 2);
+  await Promise.all(h.pending);
+  assert.equal(h.stored.size, 0);
+  assert.equal(h.cached.size, 0);
+
+  // Subsequent request returns 404
+  assert.equal((await h.request(url1)).status, 404);
+});
+
+test('uploading a report invalidates the edge cache for that path so the latest HTML is served', async () => {
+  const h = harness();
+  const report = payload();
+  assert.equal((await upload(h, report)).status, 200);
+  const url = `${config.CLOUDFLARE_REPORT_URL}/${report.path}`;
+  const first = await h.request(url);
+  assert.equal(first.status, 200);
+  assert.equal(await first.text(), report.html);
+  await Promise.all(h.pending);
+  assert.equal(h.cached.size, 1);
+
+  // Upload updated HTML for the same path
+  const updatedHtml = '<!doctype html><title>Updated</title>';
+  assert.equal((await upload(h, { ...report, html: updatedHtml })).status, 200);
+  await Promise.all(h.pending);
+
+  // Next request serves the updated HTML, not stale cache
+  const second = await h.request(url);
+  assert.equal(second.status, 200);
+  assert.equal(await second.text(), updatedHtml);
+});
+

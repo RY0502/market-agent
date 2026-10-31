@@ -5,6 +5,12 @@ interface ReportMetadata { expiresAt: number }
 export interface ReportNamespace {
   getWithMetadata<T>(key: string, type: 'text'): Promise<{ value: string | null; metadata: T | null }>;
   put(key: string, value: string, options: { expiration: number; metadata: ReportMetadata }): Promise<void>;
+  delete?(key: string): Promise<void>;
+  list?(options?: { prefix?: string; cursor?: string; limit?: number }): Promise<{
+    keys: { name: string; expiration?: number; metadata?: unknown }[];
+    list_complete: boolean;
+    cursor?: string;
+  }>;
 }
 export interface ReportEnvironment {
   REPORTS: ReportNamespace;
@@ -17,6 +23,10 @@ const uploadSchema = z.object({
   html: z.string().min(1).refine(value => new TextEncoder().encode(value).length <= 64_000),
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
+}).strict();
+const purgeSchema = z.object({
+  paths: z.array(z.string()).optional(),
+  all: z.boolean().optional(),
 }).strict();
 const errorResponse = (status: number, message: string) =>
   new Response(message, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -38,11 +48,53 @@ export async function handleReportRequest(
   now: () => number = Date.now,
 ): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname === '/stock-report-upload' || url.pathname === '/stock-report-health') {
+  if (url.pathname === '/stock-report-upload' || url.pathname === '/stock-report-health' || url.pathname === '/stock-report-purge') {
     if (!await authorized(request, env.REPORT_UPLOAD_TOKEN)) return errorResponse(401, 'Unauthorized');
     if (url.pathname === '/stock-report-health' && request.method === 'GET') {
       await env.REPORTS.getWithMetadata('__report_health__', 'text');
       return Response.json({ retentionDays: REPORT_DAYS }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (url.pathname === '/stock-report-purge') {
+      if (!['POST', 'DELETE'].includes(request.method)) return errorResponse(405, 'Method not allowed');
+      let pathsToPurge: string[] | undefined;
+      const contentType = request.headers.get('Content-Type');
+      if (contentType?.includes('application/json')) {
+        try {
+          const bodyText = await request.text();
+          if (bodyText.trim()) {
+            const parsed = purgeSchema.safeParse(JSON.parse(bodyText));
+            if (parsed.success && parsed.data.paths) {
+              pathsToPurge = parsed.data.paths;
+            }
+          }
+        } catch {
+          return errorResponse(400, 'Invalid JSON');
+        }
+      }
+      let purged = 0;
+      if (pathsToPurge && pathsToPurge.length > 0) {
+        for (const itemPath of pathsToPurge) {
+          if (isReportPath(itemPath)) {
+            if (env.REPORTS.delete) await env.REPORTS.delete(itemPath);
+            purged++;
+            const cacheKey = new Request(`${url.origin}/${itemPath.split('/').map(encodeURIComponent).join('/')}`);
+            ctx.waitUntil(cache.delete(cacheKey).catch(error => console.error('Report cache deletion failed', error)));
+          }
+        }
+      } else if (env.REPORTS.list) {
+        let cursor: string | undefined;
+        do {
+          const listResult = await env.REPORTS.list({ prefix: 'stock-reports/', cursor });
+          for (const item of listResult.keys) {
+            if (env.REPORTS.delete) await env.REPORTS.delete(item.name);
+            purged++;
+            const cacheKey = new Request(`${url.origin}/${item.name.split('/').map(encodeURIComponent).join('/')}`);
+            ctx.waitUntil(cache.delete(cacheKey).catch(error => console.error('Report cache deletion failed', error)));
+          }
+          cursor = listResult.list_complete ? undefined : listResult.cursor;
+        } while (cursor);
+      }
+      return Response.json({ purged, success: true }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (url.pathname !== '/stock-report-upload' || request.method !== 'POST') return errorResponse(405, 'Method not allowed');
     if (request.headers.get('Content-Type') !== 'application/json') return errorResponse(415, 'Expected application/json');
@@ -61,6 +113,8 @@ export async function handleReportRequest(
     await env.REPORTS.put(report.path, report.html, {
       expiration: Math.ceil(expiresAt / 1000), metadata: { expiresAt },
     });
+    const cacheKey = new Request(`${url.origin}/${report.path.split('/').map(encodeURIComponent).join('/')}`);
+    ctx.waitUntil(cache.delete(cacheKey).catch(error => console.error('Report cache invalidation failed', error)));
     return Response.json({ path: report.path, expiresAt: report.expiresAt }, { headers: { 'Cache-Control': 'no-store' } });
   }
   if (!['GET', 'HEAD'].includes(request.method)) return errorResponse(405, 'Method not allowed');

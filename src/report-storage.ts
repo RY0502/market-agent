@@ -41,3 +41,22 @@ export function createReporter(config: ReportConfig, request: typeof fetch = fet
     return { url: location.url, expiresAt };
   };
 }
+
+export async function purgeReportStorage(
+  config: ReportConfig,
+  request: typeof fetch = fetch,
+  options?: { paths?: string[]; all?: boolean },
+): Promise<{ purged: number }> {
+  const origin = httpsOrigin(config.CLOUDFLARE_REPORT_URL);
+  const response = await request(`${origin}/stock-report-purge`, {
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(45_000),
+    headers: {
+      Authorization: `Bearer ${config.CLOUDFLARE_REPORT_UPLOAD_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(options ?? { all: true }),
+  });
+  if (!response.ok) throw new Error(`Cloudflare report purge failed (HTTP ${response.status})`);
+  return z.object({ purged: z.number(), success: z.literal(true) }).parse(await response.json());
+}
+

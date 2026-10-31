@@ -140,12 +140,12 @@ ${ticks}<polyline fill="none" class="line ${trend}" points="${prices.map((point,
 ${prices.map((point, index) => `<circle class="${trend}" cx="${x(index)}" cy="${y(point.close)}" r="4"/>`).join('')}
 ${spikeElements}
 ${dateLabels}
-</svg><p class="muted">${prices.length} observed trading session${prices.length === 1 ? '' : 's'}${prices.length < requestedPoints ? ` of ${requestedPoints} requested; earlier observations were unavailable within retained history/download limits` : ''}. Missing archives are skipped; actual session dates are shown without interpolation.${spikeIndex !== null ? '<br/><strong style="color:#d9480f;display:inline-block;margin-top:4px">⚡ First ≥5% single-day spike detected in this window.</strong>' : ''}</p>`;
+</svg><p class="muted">${prices.length} observed trading session${prices.length === 1 ? '' : 's'}${prices.length < requestedPoints ? ` of ${requestedPoints} requested; earlier observations were unavailable within retained history/download limits` : ''}. Missing archives are skipped; actual session dates are shown without interpolation.${spikeIndex !== null ? '<br/><strong style="color:#d9480f;display:inline-block;margin-top:4px">⚡ First ≥5% single-day spike detected in this window.</strong>' : ''}<br><strong>Note:</strong> The gain graph is high to high values of the stock and the LTP prices list is the closing price value of the stock on each day to avoid confusion.</p>`;
 }
 
 function priceTable(prices: PricePoint[], gain: number | null): string {
   return `<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
-<div class="table-wrap" style="flex:1;min-width:220px"><table><thead><tr><th>Date</th><th>Close (INR)</th></tr></thead><tbody>${prices.map(point =>
+<div class="table-wrap" style="flex:1;min-width:220px"><div class="muted" style="font-weight:600;margin-bottom:6px">LTP prices list (daily closing values)</div><table><thead><tr><th>Date</th><th>LTP / Close (INR)</th></tr></thead><tbody>${prices.map(point =>
     `<tr><td>${escape(point.date)}</td><td>${money(point.close)}</td></tr>`).join('')}</tbody></table></div>
 <div style="flex:0 0 200px;background:#f3f6fa;border-radius:8px;padding:14px;text-align:center">
 <div class="muted">5-day rupee gain</div>
@@ -206,7 +206,7 @@ header,section,footer{overflow-wrap:anywhere}footer{padding:0 8px 20px}
       ? '<p>Initial research was unavailable; review the assessment and its limitations carefully.</p>'
       : '<p>Research was unavailable for this assessment. No investment outlook was produced.</p>'
     : ''}</header>
-<section><h2>Recent price performance</h2><p class="muted">Daily NSE bhavcopy closing prices, not intraday/live quotes. Prices are unadjusted for corporate actions.</p>${priceChart(ordered, requestedPoints)}
+<section><h2>Recent price performance</h2><p class="muted">Daily NSE bhavcopy closing prices, not intraday/live quotes. Prices are unadjusted for corporate actions. The gain graph is high to high values of the stock and the LTP prices list is the closing price value of the stock on each day to avoid confusion.</p>${priceChart(ordered, requestedPoints)}
 ${priceTable(ordered, gain)}</section>
 ${section('Investment outlook', reasoning.classificationReason)}
 ${list('Supporting considerations', reasoning.reasons)}${list('Business and investment risks', reasoning.risks)}

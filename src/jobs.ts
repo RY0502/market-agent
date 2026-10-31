@@ -46,6 +46,7 @@ export interface JobDependencies {
   researcher: (runId: string) => Researcher;
   publish: Publisher;
   report: Reporter;
+  purgeReports?: () => Promise<void>;
   request?: typeof fetch;
   screeningConfig?: () => ScreeningConfig;
   resetFrameworkState: () => Promise<void>;
@@ -216,6 +217,13 @@ export class Jobs {
       job.results = results;
       job.phase = 'reporting';
       await this.save(job);
+      if (this.deps.purgeReports) {
+        try {
+          await this.deps.purgeReports();
+        } catch (error) {
+          console.warn('Report purge warning, proceeding with reporting:', error);
+        }
+      }
       const stocks = [...results.gainers, ...results.losers];
       const requestedPoints = 10;
       const prices = await store.chartPrices(history, stocks.map(stock => stock.candidate), requestedPoints);
