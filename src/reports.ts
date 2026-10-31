@@ -57,25 +57,17 @@ export function reportReasoning(stock: RankedStock) {
   };
 }
 
-/** Detect whether the stock spiked >=5% from any prior close for the first time in the window. */
-function detectFirstSpike(prices: PricePoint[]): boolean {
-  if (prices.length < 2) return false;
-  let spiked = false;
+/** Return the index of the first point where price rose >= 5% from the preceding close in the window. */
+export function detectFirstSpikeIndex(prices: PricePoint[]): number | null {
+  if (prices.length < 2) return null;
   for (let i = 1; i < prices.length; i++) {
     const prev = prices[i - 1]!.close;
     const curr = prices[i]!.close;
     if (prev > 0 && (curr - prev) / prev >= 0.05) {
-      // This is a >=5% gain day. Check if it's the FIRST time in this window.
-      let priorSpike = false;
-      for (let j = 1; j < i; j++) {
-        const p = prices[j - 1]!.close;
-        const c = prices[j]!.close;
-        if (p > 0 && (c - p) / p >= 0.05) { priorSpike = true; break; }
-      }
-      if (!priorSpike) { spiked = true; break; }
+      return i;
     }
   }
-  return spiked;
+  return null;
 }
 
 /** Compute 5-day rupee gain from the last 5 trading days of price data. */
@@ -114,8 +106,25 @@ function priceChart(prices: PricePoint[], requestedPoints: number): string {
 <text x="${chartLeft - 8}" y="${y(value) + 4}" text-anchor="end">${escape(number(value))}</text>`;
   }).join('');
   const trend = values.at(-1)! >= values[0]! ? 'up' : 'down';
-  const spike = detectFirstSpike(prices);
-  const spikeLabel = spike ? `<text x="${chartLeft + chartWidth + 8}" y="${y(max) + 4}" class="spike-label" text-anchor="start" font-weight="bold" fill="#d9480f" font-size="13">⚡ Spike</text>` : '';
+  const spikeIndex = detectFirstSpikeIndex(prices);
+  let spikeElements = '';
+  if (spikeIndex !== null) {
+    const spikePt = prices[spikeIndex]!;
+    const spikeX = x(spikeIndex);
+    const spikeY = y(spikePt.close);
+    const textY = spikeY > 35 ? spikeY - 10 : spikeY + 22;
+    let textAnchor = 'middle';
+    let textX = spikeX;
+    if (spikeX > chartLeft + chartWidth - 30) {
+      textAnchor = 'end';
+      textX = spikeX - 4;
+    } else if (spikeX < chartLeft + 30) {
+      textAnchor = 'start';
+      textX = spikeX + 4;
+    }
+    spikeElements = `<circle cx="${spikeX}" cy="${spikeY}" r="6" fill="#d9480f" stroke="#ffffff" stroke-width="2"/>
+<text x="${textX}" y="${textY}" class="spike-label" text-anchor="${textAnchor}" font-weight="bold" fill="#d9480f" font-size="12">⚡ Spike</text>`;
+  }
   const dateLabels = prices.map((point, index) => {
     const xPos = x(index);
     const label = point.date.slice(5).split('-').reverse().join('/');
@@ -129,9 +138,9 @@ function priceChart(prices: PricePoint[], requestedPoints: number): string {
 <title id="chart-title">Daily closing prices</title><desc id="chart-desc">${escape(prices.map(point => `${point.date}: INR ${number(point.close)}`).join('; '))}</desc>
 ${ticks}<polyline fill="none" class="line ${trend}" points="${prices.map((point, index) => `${x(index)},${y(point.close)}`).join(' ')}"/>
 ${prices.map((point, index) => `<circle class="${trend}" cx="${x(index)}" cy="${y(point.close)}" r="4"/>`).join('')}
+${spikeElements}
 ${dateLabels}
-${spikeLabel}
-</svg><p class="muted">${prices.length} observed trading session${prices.length === 1 ? '' : 's'}${prices.length < requestedPoints ? ` of ${requestedPoints} requested; earlier observations were unavailable within retained history/download limits` : ''}. Missing archives are skipped; actual session dates are shown without interpolation.${spike ? ' <strong style="color:#d9480f">⚡ First ≥5% single-day spike detected in this window.</strong>' : ''}</p>`;
+</svg><p class="muted">${prices.length} observed trading session${prices.length === 1 ? '' : 's'}${prices.length < requestedPoints ? ` of ${requestedPoints} requested; earlier observations were unavailable within retained history/download limits` : ''}. Missing archives are skipped; actual session dates are shown without interpolation.${spikeIndex !== null ? '<br/><strong style="color:#d9480f;display:inline-block;margin-top:4px">⚡ First ≥5% single-day spike detected in this window.</strong>' : ''}</p>`;
 }
 
 function priceTable(prices: PricePoint[], gain: number | null): string {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createReporter, reportLocation, verifyReportHosting,
 } from '../src/report-storage.js';
-import { renderStockReport, reportReasoning } from '../src/reports.js';
+import { detectFirstSpikeIndex, renderStockReport, reportReasoning } from '../src/reports.js';
 import { candidate, research } from './helpers.js';
 import type { RankedStock } from '../src/research.js';
 import { unsureResearch } from '../src/research.js';
@@ -115,3 +115,41 @@ test('stock rank is displayed with total passing count in header badge and cards
   assert.match(html23, /Rank #12 of 23/);
   assert.match(html23, /Top 12 of 23 passing/);
 });
+
+test('detectFirstSpikeIndex detects the first >=5% gain session and renders label and note on next line', () => {
+  const sgmartPrices = [
+    { date: '2026-10-16', close: 798.2 },
+    { date: '2026-10-19', close: 776.25 },
+    { date: '2026-10-21', close: 751.2 },
+    { date: '2026-10-22', close: 756.7 },
+    { date: '2026-10-23', close: 796.8 }, // +5.30% spike
+    { date: '2026-10-26', close: 799.7 },
+    { date: '2026-10-27', close: 799.4 },
+    { date: '2026-10-28', close: 802.95 },
+    { date: '2026-10-29', close: 864.55 }, // +7.67% spike
+    { date: '2026-10-30', close: 856.35 },
+  ];
+  // The first >= 5% spike is on 2026-10-23 (index 4)
+  assert.equal(detectFirstSpikeIndex(sgmartPrices), 4);
+  assert.equal(detectFirstSpikeIndex(sgmartPrices.slice(0, 4)), null);
+
+  const sgmartStock: RankedStock = {
+    ...stock(),
+    candidate: candidate({ symbol: 'SGMART', asOfDate: '2026-10-30' }),
+  };
+  const html = render(sgmartStock, sgmartPrices, 10);
+  assert.match(html, /<circle cx="[^"]+" cy="[^"]+" r="6" fill="#d9480f"/);
+  assert.match(html, /<text x="[^"]+" y="[^"]+" class="spike-label"[^>]*>⚡ Spike<\/text>/);
+  assert.match(html, /<br\/><strong style="color:#d9480f;display:inline-block;margin-top:4px">⚡ First ≥5% single-day spike detected in this window.<\/strong>/);
+
+  // Flat prices (under 5% gain) should have no spike
+  const flatPrices = [
+    { date: '2026-10-23', close: 500 },
+    { date: '2026-10-26', close: 505 }, // +1% (no spike)
+  ];
+  assert.equal(detectFirstSpikeIndex(flatPrices), null);
+  const flatHtml = render(stock(), flatPrices, 2);
+  assert.doesNotMatch(flatHtml, /class="spike-label"/);
+  assert.doesNotMatch(flatHtml, /First ≥5% single-day spike/);
+});
+
