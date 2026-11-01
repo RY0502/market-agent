@@ -28,7 +28,7 @@ test('charts collect latest trading closes by ISIN across weekends/holidays and 
       const count = Math.min(5, lookback);
       const points = (await store.chartPrices(history, [candidate()], count)).get(candidate().isin)!;
       assert.deepEqual(points, trading.slice(-count).map((date, index) => ({
-        date, close: 480 + (trading.length - count + index) * 5,
+        date, close: 480 + (trading.length - count + index) * 5, high: 520,
       })));
     }
     assert.equal(downloads, 5);
@@ -52,7 +52,7 @@ test('short windows backfill earlier trading observations; download cap returns 
     const current = equity({ date: '2026-10-26' });
     const history = { current: [current], days: [[current]], baseline: '2026-10-26' };
     assert.deepEqual((await store.chartPrices(history, [candidate()], 2)).get(current.isin), [
-      { date: '2026-10-23', close: 500 }, { date: '2026-10-26', close: 500 },
+      { date: '2026-10-23', close: 500, high: 520 }, { date: '2026-10-26', close: 500, high: 520 },
     ]);
     assert.deepEqual(requested, ['2026-10-25', '2026-10-24', '2026-10-23']);
     store.downloads = 31;

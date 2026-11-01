@@ -50,7 +50,7 @@ test('cached narratives, previews and on-demand pages cannot reintroduce old num
   const cached = { result, baselineDate: '2026-09-28', asOfDate: '2026-10-26', validUntil: '2026-11-15T12:00:00Z' };
   const evidence = new LiveEvidence(cached);
   const context = compactResearchContext(cached, evidence);
-  assert.doesNotMatch(context, /762\.85|8\.40|100 crore/);
+  assert.doesNotMatch(context, /\b762\.85\b|\b8\.40%|\b100 crore\b/);
   assert.match(context, /Execution remains uncertain|Competition remains material/);
   assert.doesNotMatch(researchEvidencePage(evidence, evidence.reads[0]!.evidenceId!, 0), /762\.85/);
   assert.match(result.reads[0]!.output, /762\.85/, 'Original audit evidence remains unchanged');

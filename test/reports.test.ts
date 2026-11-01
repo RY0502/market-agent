@@ -5,6 +5,7 @@ import {
 } from '../src/report-storage.js';
 import { detectFirstSpikeIndex, renderStockReport, reportReasoning } from '../src/reports.js';
 import { candidate, research } from './helpers.js';
+import type { PricePoint } from '../src/bhav.js';
 import type { RankedStock } from '../src/research.js';
 import { unsureResearch } from '../src/research.js';
 
@@ -14,7 +15,7 @@ const config = {
 };
 const runId = '12345678-1234-1234-1234-123456789abc';
 const stock = (): RankedStock => ({ candidate: candidate(), research: research(), rank: 1, riskScore: 20, recoveryScore: 80 });
-const render = (item: RankedStock, prices = [{ date: '2026-10-26', close: 500 }], count = 5) =>
+const render = (item: RankedStock, prices: PricePoint[] = [{ date: '2026-10-26', close: 500 }], count = 5) =>
   renderStockReport(item, runId, prices, count, '2026-10-28T12:00:00Z', '2026-11-02T12:00:00Z');
 
 test('reports retain business reasoning and cache provenance, not technical diagnostics or invalid metrics', () => {
@@ -158,6 +159,67 @@ test('report clearly explains that gain graph is high to high values and LTP pri
   assert.match(html, /gain graph is high to high values of the stock/i);
   assert.match(html, /LTP prices list is the closing price value of the stock on each day/i);
   assert.match(html, /LTP prices list \(daily closing values\)/);
+});
+
+test('report retains LTP list table and renders separate 5-day daily high price chart and table below it', () => {
+  const htmlWithHigh = render(stock(), [
+    { date: '2026-10-22', close: 480, high: 495 },
+    { date: '2026-10-23', close: 490, high: 505 },
+    { date: '2026-10-26', close: 500, high: 525 },
+  ], 5);
+  // LTP table has Date and LTP/Close
+  assert.match(htmlWithHigh, /LTP prices list \(daily closing values\)/);
+  assert.match(htmlWithHigh, /<th>Date<\/th><th>LTP \/ Close \(INR\)<\/th><\/tr>/);
+  // Separate 5-day Highs section below it
+  assert.match(htmlWithHigh, /Daily high price performance \(last 5 sessions\)/);
+  assert.match(htmlWithHigh, /Daily high prices \(last 5 sessions\)/);
+  assert.match(htmlWithHigh, /<th>Date<\/th><th>Day High \(INR\)<\/th><\/tr>/);
+  assert.match(htmlWithHigh, /<td>&#8377;525<\/td>/);
+  assert.match(htmlWithHigh, /5-day high gain/);
+});
+
+test('screen-period change card mentions gain between high to highs in period for gainers', () => {
+  const gainerHtml = render(stock(), [{ date: '2026-10-26', close: 500 }], 5);
+  assert.match(gainerHtml, /Gain between high to highs in the period/);
+
+  const loserStock = stock();
+  loserStock.candidate.group = 'losers';
+  const loserHtml = render(loserStock, [{ date: '2026-10-26', close: 500 }], 5);
+  assert.match(loserHtml, /Movement between low to lows in the period/);
+});
+
+test('report includes fundamental guidance when P/E, valuation or market cap is present and excludes unmentioned fundamentals', () => {
+  const item = stock();
+  item.research.assessment.marketCapCrore = null;
+  item.research.assessment.debtToEquity = null;
+  item.research.assessment.pe = { value: 25, source: { url: 'https://example.com', excerpt: 'PE 25' } };
+  const html = render(item);
+  assert.match(html, /Understanding these fundamentals \(investor guide\)/);
+  assert.match(html, /P\/E \(Price-to-Earnings\) Ratio/);
+  assert.match(html, /Valuation &amp; Overvaluation/);
+  // Market cap not mentioned in metrics or text
+  assert.doesNotMatch(html, /Market Capitalization \(Company Size\)/);
+
+  // Add market cap
+  item.research.assessment.marketCapCrore = { value: 5000, source: { url: 'https://example.com', excerpt: 'Market cap 5000' } };
+  const htmlWithMcap = render(item);
+  assert.match(htmlWithMcap, /Market Capitalization \(Company Size\)/);
+});
+
+test('fundamental guide is excluded when no financial fundamentals are present in metrics or narrative', () => {
+  const item = stock();
+  item.research.assessment.pe = null;
+  item.research.assessment.sectorPe = null;
+  item.research.assessment.marketCapCrore = null;
+  item.research.assessment.debtToEquity = null;
+  item.research.assessment.earningsGrowthPercent = null;
+  item.research.assessment.classificationReason = 'Company with stable revenue model and regular operations.';
+  item.research.assessment.reasons = ['Consistent operating margins', 'Strong distribution reach'];
+  item.research.assessment.risks = ['Raw material price increases'];
+  item.research.assessment.recoveryCatalysts = ['Capacity addition'];
+  item.research.assessment.marketContext = 'General manufacturing benchmark context.';
+  const html = render(item);
+  assert.doesNotMatch(html, /Understanding these fundamentals \(investor guide\)/);
 });
 
 

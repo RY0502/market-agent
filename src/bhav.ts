@@ -42,6 +42,7 @@ export interface Candidate {
 export interface PricePoint {
   date: string;
   close: number;
+  high?: number;
 }
 
 export interface BhavHistory {
@@ -194,9 +195,9 @@ export class BhavStore {
 
   async chartPrices(history: BhavHistory, candidates: Candidate[], count: number): Promise<Map<string, PricePoint[]>> {
     if (!Number.isInteger(count) || count < 1 || count > 10) throw new Error('Chart requires between one and ten trading observations');
-    const series = new Map(candidates.map(candidate => [candidate.isin, new Map<string, number>()]));
+    const series = new Map(candidates.map(candidate => [candidate.isin, new Map<string, { close: number; high: number }>()]));
     const collect = (rows: Equity[]) => {
-      for (const row of rows) series.get(row.isin)?.set(row.date, row.close);
+      for (const row of rows) series.get(row.isin)?.set(row.date, { close: row.close, high: row.high });
     };
     for (const rows of history.days) collect(rows);
     const date = history.current[0]?.date;
@@ -214,7 +215,7 @@ export class BhavStore {
       }
     }
     return new Map([...series].map(([isin, points]) => [isin,
-      [...points].sort(([a], [b]) => a.localeCompare(b)).slice(-count).map(([date, close]) => ({ date, close })),
+      [...points].sort(([a], [b]) => a.localeCompare(b)).slice(-count).map(([date, val]) => ({ date, close: val.close, high: val.high })),
     ]));
   }
 }
