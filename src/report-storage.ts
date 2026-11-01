@@ -56,29 +56,9 @@ export async function purgeReportStorage(
     },
     body: JSON.stringify(options ?? { all: true }),
   });
-  if (response.status === 405 && options?.paths && options.paths.length > 0) {
-    const now = Date.now();
-    const createdAt = new Date(now).toISOString();
-    const expiresAt = new Date(now + REPORT_LIFETIME_MS).toISOString();
-    const purgedHtml = '<!doctype html><html lang="en"><head><title>Report Purged</title></head><body><h1>Report Purged</h1><p>This report has been purged. Please refer to the latest analysis run.</p></body></html>';
-    let purged = 0;
-    for (const itemPath of options.paths) {
-      if (isReportPath(itemPath)) {
-        const uploadRes = await request(`${origin}/stock-report-upload`, {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(45_000),
-          headers: {
-            Authorization: `Bearer ${config.CLOUDFLARE_REPORT_UPLOAD_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ path: itemPath, html: purgedHtml, createdAt, expiresAt }),
-        });
-        if (uploadRes.ok) purged++;
-      }
-    }
-    return { purged };
-  }
   if (!response.ok) throw new Error(`Cloudflare report purge failed (HTTP ${response.status})`);
   return z.object({ purged: z.number(), success: z.literal(true) }).parse(await response.json());
 }
+
 
 
