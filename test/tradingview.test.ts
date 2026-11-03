@@ -29,14 +29,18 @@ function stock(symbol = 'EXAMPLE'): RankedStock {
   return { candidate: c, research: research(symbol, { pe: null, marketCapCrore: null }), rank: 1, riskScore: 20, recoveryScore: 80 };
 }
 
-test('only missing NSE figures or an unsure assessment trigger enrichment', () => {
+test('only missing/disputed fundamentals trigger TradingView; unsure alone is not a financial-data gap', () => {
   const s = stock();
   assert.equal(needsTradingView(s), true);
   s.candidate.nse!.historical.pe = { value: 20, asOf: '2026-10-20', source: { url: 'https://nse.example/pe', excerpt: 'P/E 20' } };
   s.candidate.nse!.marketCapCrore = { value: 100, source: { url: 'https://nse.example/cap', excerpt: '100 Cr' } };
   assert.equal(needsTradingView(s), false);
   s.research.assessment.profitProbability = null;
+  assert.equal(needsTradingView(s), false);
+  s.research.assessment.warnings = [{ field: 'pe', code: 'numeric_evidence_mismatch', message: 'A financial claim is disputed.' }];
   assert.equal(needsTradingView(s), true);
+  s.research.failure = { name: 'Error', message: 'Provider failed' };
+  assert.equal(needsTradingView(s), false);
   assert.match(tradingViewPrompt('EXAMPLE'), /Basic EPS \(TTM\)/);
   assert.match(tradingViewPrompt('EXAMPLE'), /Net income \(FY\)/);
   assert.doesNotMatch(tradingViewPrompt('EXAMPLE'), /pros|cons/i);
@@ -140,7 +144,7 @@ test('enrichment is sequential, reuses captured Tavily evidence and preserves or
     assert.ok(prior.reads.some(read => read.output.includes('646.55 M INR')));
     prior.assessment.profitProbability = 'medium';
     return prior;
-  });
+  }, { concurrency: 1, exaSearch: null });
   assert.deepEqual(order, ['scrape EXAMPLE', 'reassess EXAMPLE', 'scrape SECOND']);
   assert.equal(first.research.assessment.profitProbability, 'medium');
   assert.equal(first.research.assessment.marketCapCrore!.value, 2036);
@@ -161,7 +165,7 @@ test('an empty TradingView extraction preserves original research without reasse
     url: 'https://in.tradingview.com/symbols/NSE-EXAMPLE/',
     output: JSON.stringify({ symbol: 'EXAMPLE', pe: null, marketCap: 'N/A' }),
     observedAt: new Date().toISOString(),
-  }), async (_stock, prior) => { reassessments++; return prior; });
+  }), async (_stock, prior) => { reassessments++; return prior; }, { exaSearch: null });
   assert.equal(reassessments, 0);
   assert.equal(s.research.assessment.profitProbability, 'high');
   assert.ok(s.research.assessment.warnings?.some(warning => warning.code === 'tradingview_enrichment_failed'));

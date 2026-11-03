@@ -18,7 +18,27 @@ an extracted earnings-growth metric. A missing NSE figure is unknown, never zero
 to search for a replacement. Use supplied dated historical context where available.
 NSE files are dated end-of-day data, not live quotes.
 Corporate-action records are positive event notices only; absence does not prove continuity or
-adjusted prices. Do not claim corporateActionsClear. Do not reuse old cached numerical metrics.`;
+adjusted prices. Do not claim corporateActionsClear. Do not reuse old cached numerical metrics.
+
+Explain the investment case in everyday language: what happened, any verified dated business
+explanation, what supports continuation, what could reverse it, what is missing and what would
+change the view. If no verified catalyst was found, say so; do not infer one from a price spike.
+Prefer dated exchange filings and company investor-relations disclosures over copied commentary.
+Use candidate.priceSignals when supplied: first/latest >=5% observed-close interval, observations
+since the move, spike volume versus preceding observations, subsequent activity, gain retained,
+concentration of positive price moves and peak-to-trough drawdown. Dates may span missing
+archives or sessions; never call an interval a single trading day without verification.
+These are deterministic UNADJUSTED historical measurements, not causal proof or forecasts.
+If corporate actions may explain a jump, disclose that before interpreting buying interest.
+P/E and company size are background, not next-week timing signals. Company size alone does not
+establish financial strength, liquidity or safety. No universal P/E or leverage threshold proves
+cheapness or safety; comparable period, accounting basis and industry are required.
+Missing P/E is unknown, not proof of losses. Only explain P/E as not meaningful for loss-making
+companies when matching captured earnings evidence establishes that. Do not average conflicting
+figures: distinguish TTM/annual, consolidated/standalone, dates, currency and units.
+Keep outlook, evidence confidence and downside risks distinct. In reasons explain what actually
+supports the view; in risks explain reversal scenarios; in recoveryCatalysts explain observable
+developments that would change the view, without inventing target prices or events.`;
 
 export function isPausedMetricSearch(query: string): boolean {
   return /\b(?:P\/?E|price[- ]to[- ]earnings|market\s*cap(?:italization|italisation)?|debt\s*(?:\/|to|-to-)\s*equity|earnings[- ]growth|corporate[- ]actions?|quote\s*(?:timestamp|time)|(?:live|current|latest)\s+(?:(?:stock|share)\s+)?(?:prices?|quotes?)|(?:stock|share)\s+prices?)\b/i.test(query);

@@ -14,7 +14,7 @@ const cacheSchema = z.object({
     researchedAt: z.string().datetime({ offset: true }),
     reads: z.array(z.object({
       url: z.string().url(), output: z.string(), observedAt: z.string().datetime({ offset: true }),
-      kind: z.enum(['tavily', 'scrape', 'nse']).optional(),
+      kind: z.enum(['tavily', 'exa', 'scrape', 'nse']).optional(),
       publishedAt: z.string().optional(), newsDays: z.number().optional(),
     })),
   }),

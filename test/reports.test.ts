@@ -117,7 +117,7 @@ test('stock rank is displayed with total passing count in header badge and cards
   assert.match(html23, /Top 12 of 23 passing/);
 });
 
-test('detectFirstSpikeIndex detects the first >=5% gain session and renders label and note on next line', () => {
+test('spike annotation describes observed-close intervals without claiming consecutive trading sessions', () => {
   const sgmartPrices = [
     { date: '2026-10-16', close: 798.2 },
     { date: '2026-10-19', close: 776.25 },
@@ -141,7 +141,8 @@ test('detectFirstSpikeIndex detects the first >=5% gain session and renders labe
   const html = render(sgmartStock, sgmartPrices, 10);
   assert.match(html, /<circle cx="[^"]+" cy="[^"]+" r="6" fill="#d9480f"/);
   assert.match(html, /<text x="[^"]+" y="[^"]+" class="spike-label"[^>]*>⚡ Spike<\/text>/);
-  assert.match(html, /<br\/><strong style="color:#d9480f;display:inline-block;margin-top:4px">⚡ First ≥5% single-day spike detected in this window.<\/strong>/);
+  assert.match(html, /First ≥5% rise between observed closes in this window; not necessarily one trading day/);
+  assert.doesNotMatch(html, /single-day spike/);
 
   // Flat prices (under 5% gain) should have no spike
   const flatPrices = [
@@ -154,28 +155,49 @@ test('detectFirstSpikeIndex detects the first >=5% gain session and renders labe
   assert.doesNotMatch(flatHtml, /First ≥5% single-day spike/);
 });
 
-test('report clearly explains that gain graph is high to high values and LTP prices list is closing price', () => {
+test('report distinguishes closing-price graph, intraday screening movement and non-live prices', () => {
   const html = render(stock(), [{ date: '2026-10-26', close: 500 }], 5);
-  assert.match(html, /gain graph is high to high values of the stock/i);
-  assert.match(html, /LTP prices list is the closing price value of the stock on each day/i);
-  assert.match(html, /LTP prices list \(daily closing values\)/);
+  assert.match(html, /closing-price graph is separate from the endpoint high-to-high screening calculation/i);
+  assert.match(html, /This graph and the table use daily closing prices/);
+  assert.match(html, /Daily closing prices \(not live LTP\)/);
+  assert.match(html, /Linear price axis/);
+  assert.doesNotMatch(html, /gain graph is high to high values/);
+  assert.match(html, /Closing-price change across 1 observation/);
+  assert.match(html, /At least two observations are required/);
 });
 
-test('report retains LTP list table and renders separate 5-day daily high price chart and table below it', () => {
+test('report labels actual observation counts and dates rather than implying five-day returns', () => {
   const htmlWithHigh = render(stock(), [
     { date: '2026-10-22', close: 480, high: 495 },
     { date: '2026-10-23', close: 490, high: 505 },
     { date: '2026-10-26', close: 500, high: 525 },
   ], 5);
   // LTP table has Date and LTP/Close
-  assert.match(htmlWithHigh, /LTP prices list \(daily closing values\)/);
-  assert.match(htmlWithHigh, /<th>Date<\/th><th>LTP \/ Close \(INR\)<\/th><\/tr>/);
+  assert.match(htmlWithHigh, /Daily closing prices \(not live LTP\)/);
+  assert.match(htmlWithHigh, /<th>Date<\/th><th>Close \(INR\)<\/th><\/tr>/);
   // Separate 5-day Highs section below it
-  assert.match(htmlWithHigh, /Daily high price performance \(last 5 sessions\)/);
-  assert.match(htmlWithHigh, /Daily high prices \(last 5 sessions\)/);
+  assert.match(htmlWithHigh, /Daily high price performance \(up to 5 observations\)/);
+  assert.match(htmlWithHigh, /Daily high prices \(3 observations\)/);
   assert.match(htmlWithHigh, /<th>Date<\/th><th>Day High \(INR\)<\/th><\/tr>/);
   assert.match(htmlWithHigh, /<td>&#8377;525<\/td>/);
-  assert.match(htmlWithHigh, /5-day high gain/);
+  assert.match(htmlWithHigh, /High-price change across 3 observations/);
+  assert.match(htmlWithHigh, /Closing-price change across 3 observations/);
+  assert.match(htmlWithHigh, /2026-10-22 to 2026-10-26; 2 observed intervals/);
+  assert.doesNotMatch(htmlWithHigh, /5-day rupee gain|5-day high gain/);
+});
+
+test('both charts use linear price coordinates for equally sized rupee movements', () => {
+  const html = render(stock(), [
+    { date: '2026-10-22', close: 400, high: 600 },
+    { date: '2026-10-23', close: 450, high: 650 },
+    { date: '2026-10-26', close: 500, high: 700 },
+  ]);
+  const lines = [...html.matchAll(/<polyline fill="none" class="line up" points="([^"]+)"/g)];
+  assert.equal(lines.length, 2);
+  for (const line of lines) {
+    const coordinates = line[1]!.split(' ').map(point => Number(point.split(',')[1]));
+    assert.ok(Math.abs((coordinates[0]! - coordinates[1]!) - (coordinates[1]! - coordinates[2]!)) < 1e-8);
+  }
 });
 
 test('screen-period change card mentions gain between high to highs in period for gainers', () => {
@@ -221,5 +243,3 @@ test('fundamental guide is excluded when no financial fundamentals are present i
   const html = render(item);
   assert.doesNotMatch(html, /Understanding these fundamentals \(investor guide\)/);
 });
-
-

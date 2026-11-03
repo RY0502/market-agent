@@ -5,6 +5,7 @@ import { addDays, dateValue } from './dates.js';
 import { atomicWrite, readOptional } from './storage.js';
 import { ACTIVE_GROUPS, loadScreeningConfig, SHORTLIST_SIZE, withinPrice, type ScreeningConfig } from './screening.js';
 import type { NseFundamentals } from './nse-fundamentals.js';
+import { calculatePriceSignals, type PriceSignals } from './price-signals.js';
 
 export interface Equity {
   symbol: string;
@@ -20,6 +21,7 @@ export interface Equity {
 
 export interface Candidate {
   nse?: NseFundamentals;
+  priceSignals?: PriceSignals;
   symbol: string;
   isin: string;
   name: string;
@@ -47,6 +49,7 @@ export interface PricePoint {
 
 export interface BhavHistory {
   dates?: string[];
+  missingDates?: string[];
   current: Equity[];
   days: Equity[][];
   baseline: string;
@@ -190,7 +193,7 @@ export class BhavStore {
     days.push(current);
     dates.push(date);
     await atomicWrite(path.join(this.root, 'reduced', `${date}.json`), JSON.stringify({ settings, baseline, current, days }));
-    return { current, days, baseline, dates };
+    return { current, days, baseline, dates, missingDates: [...this.missingDates] };
   }
 
   async chartPrices(history: BhavHistory, candidates: Candidate[], count: number): Promise<Map<string, PricePoint[]>> {
@@ -221,7 +224,7 @@ export class BhavStore {
 }
 
 export function screen(
-  history: { current: Equity[]; days: Equity[][]; baseline: string },
+  history: { current: Equity[]; days: Equity[][]; baseline: string; missingDates?: string[] },
   settings: ScreeningConfig = loadScreeningConfig(),
 ): Candidate[] {
   const first = new Map(history.days[0]!.map(row => [row.isin, row]));
@@ -237,7 +240,7 @@ export function screen(
   for (const current of history.current) {
     const base = first.get(current.isin);
     if (!base || base.high <= 0 || base.low <= 0) continue;
-    const samples = series.get(current.isin)!;
+    const samples = series.get(current.isin)!.sort((a, b) => a.date.localeCompare(b.date));
     const prior = samples.slice(0, -1);
     const averageVolume = prior.reduce((sum, row) => sum + row.volume, 0) / prior.length;
     const averageTurnover = prior.reduce((sum, row) => sum + row.turnover, 0) / prior.length;
@@ -262,6 +265,7 @@ export function screen(
         baselineDate: history.baseline, asOfDate: current.date,
         averageVolume, averageTurnover, volumeRatio: current.volume / averageVolume,
         volatility, observations: samples.length,
+        priceSignals: calculatePriceSignals(samples, history.days.length, history.missingDates),
       });
     }
   }

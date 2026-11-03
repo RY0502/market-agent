@@ -4,6 +4,8 @@ import type { LLMResult } from '@langchain/core/outputs';
 import { z } from 'zod';
 import { normalizeSubmissionArguments, schemaIssueDetails } from './schema-diagnostics.js';
 
+export const researchConcurrencySchema = z.coerce.number().int().min(1).max(25).default(5);
+
 export const researchLimitsSchema = z.object({
   RESEARCH_TIMEOUT_MS: z.coerce.number().int().min(1).max(2_147_483_647).default(360_000),
   RESEARCH_MAX_MODEL_CALLS: z.coerce.number().int().positive().default(20),

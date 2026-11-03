@@ -11,6 +11,7 @@ import { withResearchCache } from './research-cache.js';
 import type { Reporter, ReportReference } from './reports.js';
 import type { ResearchResult } from './research.js';
 import { NseFundamentalsStore } from './nse-fundamentals.js';
+import { researchQuality } from './research-quality.js';
 
 export interface Job {
   id: string;
@@ -35,6 +36,8 @@ export interface Job {
     warnings: ResearchWarning[]; failure?: { name: string; message: string };
     group: Candidate['group']; cache?: ResearchResult['cache']; report?: ReportReference;
     nse?: Candidate['nse']; rank?: number; totalPassing?: number;
+    supplementalEvidence?: ResearchResult['reads'];
+    evidenceQuality?: ReturnType<typeof researchQuality>;
   }[];
   results?: { gainers: RankedStock[]; losers: RankedStock[] };
   inserted?: { gainers: number; losers: number };
@@ -136,7 +139,7 @@ export class Jobs {
     return contents ? JSON.parse(contents.toString()) as Job : undefined;
   }
 
-  /** Run screening, research, sequential enrichment, reporting and publication in order. */
+  /** Run screening, concurrent research/enrichment, reporting and publication in order. */
   private async execute(job: Job): Promise<void> {
     const store = new BhavStore(this.deps.root, this.deps.request);
     const fundamentals = new NseFundamentalsStore(this.deps.root, this.deps.request);
@@ -212,6 +215,8 @@ export class Jobs {
           outcome.dataGapReason = stock.research.assessment.dataGapReason;
           outcome.warnings = stock.research.assessment.warnings ?? [];
           outcome.failure = stock.research.failure;
+          outcome.supplementalEvidence = stock.research.reads.filter(read => read.kind === 'exa' || read.kind === 'scrape');
+          outcome.evidenceQuality = researchQuality(stock);
         }
       }
       job.results = results;

@@ -19,11 +19,19 @@ for (const lookback of [2, 3, 30]) {
     const jobs: Jobs = new Jobs({
       root, screeningConfig: () => loadScreeningConfig({ LOOKBACK_DAYS: String(lookback) }),
       resetFrameworkState: async () => {},
-      researcher: () => async c => research(c.symbol),
+      researcher: () => async c => {
+        assert.ok(c.priceSignals, 'Price/volume signals must be present before fresh or cached research');
+        return research(c.symbol);
+      },
       enrich: async stocks => {
         enriched++;
         stocks[0]!.research.assessment.profitProbability = 'medium';
         stocks[0]!.research.assessment.classificationReason = 'The completed enrichment changes the final investment outlook.';
+        stocks[0]!.research.reads.push({
+          kind: 'exa', evidenceId: 'supplemental-disclosure', url: 'https://company.example/disclosure',
+          observedAt: new Date().toISOString(), publishedAt: new Date().toISOString(),
+          output: 'The company published a disclosure about execution risks and project progress.',
+        });
       },
       request: async () => { throw new Error('All bhavcopies must be cached'); },
       report: async (stock, runId, prices, count) => {
@@ -45,6 +53,8 @@ for (const lookback of [2, 3, 30]) {
         assert.equal(persisted.stockOutcomes![0]!.classificationReason, 'The completed enrichment changes the final investment outlook.');
         assert.equal(persisted.stockOutcomes![0]!.report!.url, results.gainers[0]!.report!.url);
         assert.equal(persisted.stockOutcomes![0]!.cache!.hit, publications > 1);
+        assert.equal(persisted.stockOutcomes![0]!.supplementalEvidence![0]!.kind, 'exa');
+        assert.ok(persisted.stockOutcomes![0]!.evidenceQuality);
       },
     });
     try {
@@ -62,6 +72,8 @@ for (const lookback of [2, 3, 30]) {
         assert.equal(saved.status, 'completed', saved.error);
         assert.equal(saved.stockOutcomes![0]!.cache!.hit, run > 0);
         assert.ok(saved.stockOutcomes![0]!.report!.expiresAt);
+        assert.equal(saved.stockOutcomes![0]!.supplementalEvidence![0]!.evidenceId, 'supplemental-disclosure',
+          'Supplemental evidence survives successful intermediate cleanup');
       }
       failUpload = true;
       const failed = await jobs.start(date);

@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { CONFIG } from 'freetier-deepagent-framework';
 import { z } from 'zod';
 import { normalizeMetricText } from './financial-metrics.js';
-import { isResearchNetworkError, researchLimitsSchema } from './research-control.js';
+import { isResearchNetworkError, researchConcurrencySchema, researchLimitsSchema } from './research-control.js';
 import { runResearchProcess } from './research-process.js';
 import { validateAssessment, type RankedStock, type ResearchResult } from './research.js';
+import { createExaSearch, loadExaConfig, type ExaSearch } from './exa.js';
+import { businessEvidenceGaps } from './research-quality.js';
 
 const scalar = z.union([z.string(), z.number()]).nullish().transform(value => {
   if (value == null || /^(?:|null|n\/?a|--?|not available)$/i.test(String(value).trim())) return null;
@@ -24,11 +26,15 @@ const extractionSchema = z.object({
   companyDescription: scalar,
 });
 
-/** Select stocks with no NSE P/E or market cap in either current or historical files, or an unsure outlook. */
+/** A missing or disputed fundamental warrants extraction; an unsure category alone does not. */
 export function needsTradingView(stock: RankedStock): boolean {
+  if (stock.research.failure) return false;
   const nse = stock.candidate.nse;
-  return stock.research.assessment.profitProbability === null ||
-    !(nse?.pe ?? nse?.historical?.pe) || !(nse?.marketCapCrore ?? nse?.historical?.marketCapCrore);
+  return !(nse?.pe ?? nse?.historical?.pe ?? stock.research.assessment.pe?.source) ||
+    !(nse?.marketCapCrore ?? nse?.historical?.marketCapCrore ?? stock.research.assessment.marketCapCrore?.source) ||
+    Boolean(stock.research.assessment.warnings?.some(warning =>
+      ['pe', 'marketCapCrore'].includes(warning.field.replace(/^evidenceIds\./, '')) &&
+      ['numeric_evidence_mismatch', 'unobserved_source', 'uncited_metric'].includes(warning.code)));
 }
 
 /** Request only visible TradingView company statistics, retaining their units and periods. */
@@ -137,10 +143,17 @@ export function attachTradingView(stock: RankedStock, page: { url: string; outpu
     }
   }
   result.assessment.sources = [...result.assessment.sources.slice(0, 19), source];
+  if (!result.assessment.pe && data.basicEpsTtm &&
+    /^(?:INR\s*)?-\d+(?:[.,]\d+)*(?:\s*INR)?$/i.test(data.basicEpsTtm)) {
+    (result.assessment.warnings ??= []).push({
+      field: 'pe', code: 'pe_not_meaningful',
+      message: 'TradingView displays negative TTM earnings per share; a conventional positive P/E comparison is not meaningful for that reporting basis. This does not establish earnings for other periods.',
+    });
+  }
   return result;
 }
 
-/** Enrich and reassess eligible stocks one at a time, preserving the original result on failure. */
+/** Gap-directed enrichment shares the research concurrency limit and preserves rank and failures. */
 export async function enrichStocks(
   stocks: RankedStock[], root: string, runId: string,
   scrape = scrapeTradingView,
@@ -150,11 +163,45 @@ export async function enrichStocks(
     return runResearchProcess(new URL(`./research-worker.${extension}`, import.meta.url),
       { root, runId, candidate: stock.candidate, limits, prior }, limits.RESEARCH_TIMEOUT_MS);
   },
+  options: { concurrency?: number; exaSearch?: ExaSearch | null } = {},
 ): Promise<void> {
-  for (const stock of stocks) {
-    if (!needsTradingView(stock)) continue;
+  const concurrency = researchConcurrencySchema.parse(options.concurrency ?? process.env.RESEARCH_CONCURRENCY);
+  const exaConfig = options.exaSearch === undefined ? loadExaConfig() : undefined;
+  const exa = options.exaSearch === undefined
+    ? exaConfig?.enabled ? createExaSearch(exaConfig) : null : options.exaSearch;
+  const enrich = async (stock: RankedStock) => {
+    if (stock.research.failure) return;
+    let prior = structuredClone(stock.research);
+    let changed = false;
+    const warn = (code: string, message: string) => {
+      const warning = { field: 'research', code, message };
+      (stock.research.assessment.warnings ??= []).push(warning);
+      (prior.assessment.warnings ??= []).push(warning);
+      console.warn(JSON.stringify({ event: code, runId, symbol: stock.candidate.symbol, message }));
+    };
+    const gaps = businessEvidenceGaps(stock.research);
+    if (exa && gaps.length) {
+      console.info(JSON.stringify({ event: 'exa_fallback_started', runId, symbol: stock.candidate.symbol, gaps }));
+      try {
+        const reads = await exa(stock.candidate, prior.reads);
+        prior.reads.push(...reads);
+        changed = reads.length > 0;
+        if (!reads.length) warn('exa_no_additional_evidence', 'Exa found no additional usable, identity-matched business evidence; the existing gaps remain.');
+        console.info(JSON.stringify({ event: 'exa_fallback_completed', runId, symbol: stock.candidate.symbol, evidenceRecords: reads.length }));
+      } catch (error) {
+        warn('exa_fallback_failed', `Exa fallback failed; original evidence retained (${error instanceof Error ? error.message : 'SearchError'}).`);
+      }
+    }
+    if (needsTradingView(stock)) {
+      try {
+        prior = attachTradingView({ ...stock, research: prior }, await scrape(stock.candidate.symbol));
+        changed = true;
+      } catch (error) {
+        warn('tradingview_enrichment_failed', `TradingView enrichment failed; original research retained (${error instanceof Error ? error.message : String(error)}).`);
+      }
+    }
+    if (!changed) return;
     try {
-      const prior = attachTradingView(stock, await scrape(stock.candidate.symbol));
       const result = await reassess(stock, prior);
       validateAssessment(result.assessment, stock.candidate, result.reads);
       stock.research = result;
@@ -163,13 +210,14 @@ export async function enrichStocks(
         (100 / (1 + stock.candidate.averageTurnover / 10_000_000)) * 0.4;
       stock.riskScore = risk === null ? null : Math.round((observed * 0.4 + risk * 0.6) * 100) / 100;
       stock.recoveryScore = result.assessment.recoveryScore;
-      console.info(JSON.stringify({ event: 'tradingview_enrichment_ok', runId, symbol: stock.candidate.symbol,
+      console.info(JSON.stringify({ event: 'research_enrichment_ok', runId, symbol: stock.candidate.symbol,
         profitProbability: result.assessment.profitProbability }));
     } catch (error) {
-      const warning = { field: 'research', code: 'tradingview_enrichment_failed',
-        message: `TradingView enrichment or final reassessment failed; original research retained (${error instanceof Error ? error.message : String(error)}).` };
-      (stock.research.assessment.warnings ??= []).push(warning);
-      console.warn(JSON.stringify({ event: 'tradingview_enrichment_failed', runId, symbol: stock.candidate.symbol, message: warning.message }));
+      stock.research.reads = prior.reads;
+      warn('enrichment_reassessment_failed', `Final reassessment failed; the original decision is retained, and supplemental evidence remains in the audit (${error instanceof Error ? error.message : String(error)}).`);
     }
+  };
+  for (let offset = 0; offset < stocks.length; offset += concurrency) {
+    await Promise.all(stocks.slice(offset, offset + concurrency).map(enrich));
   }
 }
