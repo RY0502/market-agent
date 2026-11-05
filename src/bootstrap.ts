@@ -1,4 +1,4 @@
-import { runWithFinalizer } from "./services/runLifecycle.js";
+import { RunFinalizationError, runWithFinalizer } from "./services/runLifecycle.js";
 
 export interface AgentBootstrapDependencies {
   cleanup(): Promise<void>;
@@ -16,8 +16,9 @@ const DEFAULT_DEPENDENCIES: AgentBootstrapDependencies = {
     await resetFrameworkState(db);
   },
   validatePauseConfiguration: async () => {
-    const { buildVmPauseUrl } = await import("./services/vmPauseService.js");
+    const { buildVmPauseUrl, vmPauseTimeoutMs } = await import("./services/vmPauseService.js");
     buildVmPauseUrl();
+    vmPauseTimeoutMs();
   },
   loadAndRunAgent: async () => {
     const { runAgent } = await import("./agent.js");
@@ -43,4 +44,20 @@ export async function runAgentBootstrap(
     finalize: dependencies.pause,
     onSuppressedFinalizeError: dependencies.onSuppressedPauseError,
   });
+}
+
+export function reportBootstrapFailure(error: unknown): void {
+  if (error instanceof RunFinalizationError) {
+    console.error('Agent invocation completed, but VM pause finalization failed:', error.cause);
+    console.error('Do not repeat completed market publication to retry VM pause. Inspect the remote pause outcome separately.');
+    process.exitCode = 2;
+    return;
+  }
+  console.error('Run failed with error:', error);
+  if (error instanceof Error) {
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+  }
+  process.exitCode = 1;
 }

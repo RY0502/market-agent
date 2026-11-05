@@ -4,6 +4,14 @@ export interface RunLifecycleOptions<T> {
   onSuppressedFinalizeError?: (error: unknown) => void;
 }
 
+export class RunFinalizationError extends Error {
+  name = 'RunFinalizationError';
+  readonly runSucceeded = true;
+  constructor(cause: unknown) {
+    super('Agent invocation succeeded, but its final lifecycle action failed.', { cause });
+  }
+}
+
 /**
  * Always awaits the final action. If both operations fail, the original run
  * error remains authoritative while the finalization error is reported.
@@ -29,7 +37,7 @@ export async function runWithFinalizer<T>(options: RunLifecycleOptions<T>): Prom
           console.error("Unable to report final lifecycle failure:", diagnosticError);
         }
       } else {
-        throw error;
+        throw new RunFinalizationError(error);
       }
     }
   }

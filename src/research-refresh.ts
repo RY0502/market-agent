@@ -7,6 +7,7 @@ import { todayIST } from './dates.js';
 import { ResearchLimitError, retryResearchNetwork, type ResearchDiagnostics } from './research-control.js';
 import type { CachedResearchContext, LiveEvidence, ResearchWarning } from './research.js';
 import { NSE_RESEARCH_POLICY } from './research-policy.js';
+import { selectAssessmentResponse, assessmentResponseShape } from './assessment-response.js';
 
 export const CACHED_CONTEXT_MAX_CHARS = 12_000;
 export const EVIDENCE_PAGE_MAX_CHARS = 6_000;
@@ -107,6 +108,7 @@ export function createResearchEvidenceTool(
 export function createCachedRefreshPolicy(options: {
   candidate: Candidate; cached: CachedResearchContext; evidence: LiveEvidence;
   diagnostics: ResearchDiagnostics; warnings: ResearchWarning[]; hasAssessment: () => boolean;
+  submissionSchema?: z.AnyZodObject;
 }): AgentMiddleware {
   const { candidate, cached, evidence, diagnostics, warnings, hasAssessment } = options;
   let refresh: Promise<void> | undefined;
@@ -168,6 +170,7 @@ export function createCachedRefreshPolicy(options: {
           'null=Unsure if inconclusive. Missing individual metrics/citations do not force Unsure. ' +
           'Never invent figures, sources or certainty. Cached figures without citations remain unverified. ' +
           'Submit exactly once using submit_stock_assessment. Financial metrics are application-owned, not model fields. ' +
+          'If native tool calling is unavailable, return only one complete JSON object matching the assessment tool schema, without prose or extra keys. ' +
           'fundamentalRisk and recoveryScore are comparative scores; use numbers or null when unsupported. ' +
           'Use captured evidenceIds when available. Include classificationReason, reasons and risks. ' +
           'profitProbability must be exactly "low", "medium", "high" or JSON null. ' +
@@ -183,9 +186,16 @@ export function createCachedRefreshPolicy(options: {
       let response = await retryResearchNetwork(() => handler(assessmentRequest), diagnostics, 'cached_assessment');
       const selectCall = (message: AIMessage, allowRead: boolean) => {
         const calls = message.tool_calls ?? [];
-        const assessments = calls.filter(call => call.name === 'submit_stock_assessment');
-        if (assessments.length === 1) return assessments[0];
-        if (assessments.length) return undefined;
+        const selected = selectAssessmentResponse(message, { schema: options.submissionSchema, symbol: candidate.symbol });
+        if (selected) {
+          if (selected.synthesized) {
+            diagnostics.requestTool('submit_stock_assessment', selected.response.tool_calls![0]!.id);
+            diagnostics.event('assessment_response_recovered', { format: selected.format, discardedCalls: selected.discarded });
+          }
+          return selected.response.tool_calls![0];
+        }
+        const shape = assessmentResponseShape(message);
+        if (shape.assessmentCalls || shape.invalidAssessmentCalls) return undefined;
         if (allowRead && calls.length === 1 && calls[0]!.name === 'read_research_evidence') return calls[0];
         return undefined;
       };
@@ -203,11 +213,17 @@ export function createCachedRefreshPolicy(options: {
             'No assessment has been accepted. Return exactly one submit_stock_assessment tool call now. ' +
             'Use only the supplied research; do not search, read evidence, plan or return prose. ' +
             'Missing metrics or citations do not block submission. Use profitProbability:null if inconclusive. ' +
+            'If native tool calling is unavailable, return only one complete JSON object matching the assessment schema. ' +
             'This is the only completion recovery; do not invent facts or submit multiple assessments.',
           )],
         }), diagnostics, 'cached_assessment_completion');
         selected = selectCall(response, false);
-        if (!selected) throw new Error('Cached refresh did not produce one unambiguous assessment after its completion repair');
+        if (!selected) {
+          diagnostics.event('assessment_response_unusable', {
+            ...assessmentResponseShape(response), reason: 'cached_completion_repair_did_not_produce_unambiguous_assessment',
+          });
+          throw new Error('Cached refresh did not produce one unambiguous assessment after its completion repair');
+        }
       }
       if ((response.tool_calls?.length ?? 0) > 1 || response.invalid_tool_calls?.length) {
         diagnostics.event('cached_refresh_extra_calls_discarded', {
@@ -215,6 +231,7 @@ export function createCachedRefreshPolicy(options: {
         });
         response = new AIMessage({ ...response, tool_calls: [selected], invalid_tool_calls: [] });
       }
+      if (!response.tool_calls?.length) response = new AIMessage({ ...response, content: '', tool_calls: [selected], invalid_tool_calls: [] });
       if (selected.name === 'read_research_evidence') evidenceRead = true;
       else assessmentRequested = true;
       return response;

@@ -5,19 +5,19 @@ import { DynamicStructuredTool } from '@langchain/core/tools';
 import { createAgent } from 'langchain';
 import { z } from 'zod';
 import {
-  createAssessmentCompletionGuard, createAssessmentGate, createResearchModelPolicy, LiveEvidence,
+  createAssessmentCompletionGuard, createAssessmentGate, createResearchModelPolicy, createFinalAssessmentPolicy, LiveEvidence,
   resolveSubmission, submissionExamples, submissionSchema, validateAssessment,
 } from '../src/research.js';
 import { ResearchDiagnostics, researchLimitsSchema } from '../src/research-control.js';
 import { candidate, ScriptedModel } from './helpers.js';
 
-function setup(replies: (AIMessage | Error)[], maxModelCalls = 20) {
+function setup(replies: (AIMessage | Error)[], maxModelCalls = 20, maxToolCalls = 40, final = false) {
   const model = new ScriptedModel(replies);
   const events: Record<string, unknown>[] = [];
   const failures: Error[] = [];
   const diagnostics = new ResearchDiagnostics(
     { runId: 'completion-test', symbol: 'EXAMPLE' },
-    researchLimitsSchema.parse({ RESEARCH_MAX_MODEL_CALLS: maxModelCalls }),
+    researchLimitsSchema.parse({ RESEARCH_MAX_MODEL_CALLS: maxModelCalls, RESEARCH_MAX_TOOL_CALLS: maxToolCalls }),
     submissionSchema, error => failures.push(error), event => events.push(event),
   );
   const evidence = new LiveEvidence();
@@ -46,7 +46,8 @@ function setup(replies: (AIMessage | Error)[], maxModelCalls = 20) {
   const gate = createAssessmentGate('EXAMPLE', diagnostics);
   const agent = createAgent({
     model, tools: [submit, search, todos],
-    middleware: [createAssessmentCompletionGuard(() => accepted, diagnostics), createResearchModelPolicy(() => accepted, diagnostics), {
+    middleware: [createAssessmentCompletionGuard(() => accepted, diagnostics, 'EXAMPLE', submissionSchema),
+      (final ? createFinalAssessmentPolicy : createResearchModelPolicy)(() => accepted, diagnostics), {
       name: 'submission-gate',
       wrapToolCall: (request, handler) => gate(request.toolCall, async args => handler(args
         ? { ...request, toolCall: { ...request.toolCall, args } } : request)),
@@ -91,6 +92,75 @@ test('a second prose-only response fails explicitly after exactly one repair', a
   assert.equal(state.model.calls.length, 2);
   assert.equal(state.accepted(), false);
   assert.equal(state.searches(), 0);
+  assert.ok(state.events.some(event => event.event === 'assessment_response_unusable' && event.toolCalls === 0 && Number(event.textChars) > 0));
+});
+
+test('completion accepts one assessment bundled with extras and never executes the discarded tools', async () => {
+  const accepted = submission().tool_calls![0]!;
+  const state = setup([new AIMessage('Finished.'), new AIMessage({ content: '', tool_calls: [
+    { name: 'write_todos', args: {}, id: 'extra-todos', type: 'tool_call' }, accepted,
+    { name: 'test_search', args: {}, id: 'extra-search', type: 'tool_call' },
+  ] })]);
+  await state.run();
+  assert.equal(state.accepted(), true);
+  assert.equal(state.model.calls.length, 2);
+  assert.equal(state.searches(), 0);
+  assert.ok(state.events.some(event => event.event === 'assessment_response_recovered' && event.discardedCalls === 2));
+});
+
+for (const final of [false, true]) {
+  test(`schema-valid JSON is routed through the normal gate in ${final ? 'final reassessment' : 'fresh research'}`, async () => {
+    const state = setup([new AIMessage(JSON.stringify(submissionExamples.unclassified))], 20, 40, final);
+    await state.run();
+    assert.equal(state.accepted(), true);
+    assert.equal(state.model.calls.length, 1);
+    assert.equal(state.searches(), 0);
+    assert.equal(state.events.filter(event => event.event === 'assessment_completion_repair').length, 0);
+    assert.equal(state.events.filter(event => event.event === 'research_tool_requested').length, 1);
+    assert.ok(state.events.some(event => event.event === 'assessment_response_recovered' && event.format === 'structured_json'));
+  });
+}
+
+test('completion recovers a JSON tool envelope without another model/search request', async () => {
+  const state = setup([new AIMessage('Finished.'), new AIMessage(JSON.stringify({
+    name: 'submit_stock_assessment', arguments: submissionExamples.unclassified,
+  }))]);
+  await state.run();
+  assert.equal(state.accepted(), true);
+  assert.equal(state.model.calls.length, 2);
+  assert.equal(state.searches(), 0);
+});
+
+test('competing assessments are not arbitrarily selected or sent for content correction', async () => {
+  const state = setup([new AIMessage({ content: '', tool_calls: [
+    submission().tool_calls![0]!,
+    { ...submission().tool_calls![0]!, id: 'different', args: submissionExamples.classified },
+  ] })]);
+  await assert.rejects(state.run(), /multiple competing stock assessments/);
+  assert.equal(state.model.calls.length, 1);
+  assert.equal(state.accepted(), false);
+  assert.ok(state.events.some(event => event.event === 'assessment_response_unusable' && event.assessmentCalls === 2));
+});
+
+test('competing assessments in the single completion attempt remain explicit failures without choosing one', async () => {
+  const state = setup([new AIMessage('Finished.'), new AIMessage({ content: '', tool_calls: [
+    submission().tool_calls![0]!,
+    { ...submission().tool_calls![0]!, id: 'different', args: submissionExamples.classified },
+  ] })]);
+  await assert.rejects(state.run(), /Completion repair returned competing stock assessments/);
+  assert.equal(state.model.calls.length, 2);
+  assert.equal(state.accepted(), false);
+  assert.equal(state.events.filter(event => event.event === 'assessment_completion_repair').length, 1);
+});
+
+test('synthesized JSON submissions consume the original tool budget', async () => {
+  const state = setup([new AIMessage({ content: '', tool_calls: [
+    { name: 'test_search', args: {}, id: 'research', type: 'tool_call' },
+  ] }), new AIMessage(JSON.stringify(submissionExamples.unclassified))], 20, 1);
+  await assert.rejects(state.run(), /Per-stock research budget exhausted/);
+  assert.equal(state.accepted(), false);
+  assert.equal(state.model.calls.length, 2);
+  assert.equal(state.failures.length, 1);
 });
 
 test('an accepted submission needs no final model call, TODO update or completion repair', async () => {

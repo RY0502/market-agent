@@ -85,6 +85,7 @@ function setup(replies: (AIMessage | Error)[], options: { searchError?: Error; m
       TodoListMiddleware(),
       createCachedRefreshPolicy({
         candidate: candidate(), cached, evidence, diagnostics, warnings,
+        submissionSchema,
         hasAssessment: () => assessment !== undefined,
       }),
       { name: 'gate', wrapToolCall: (request, handler) => gate(request.toolCall, async args => handler(args
@@ -118,6 +119,16 @@ test('a cache hit runs one bounded news search then one assessment, without metr
     ['read_research_evidence', 'submit_stock_assessment']);
   const context = state.events.find(event => event.event === 'cached_refresh_assessment')!;
   assert.ok(Number(context.contextChars) <= CACHED_CONTEXT_MAX_CHARS);
+});
+
+test('cached refresh accepts only complete structured JSON without repeating searches or adding model calls', async () => {
+  const state = setup([new AIMessage(JSON.stringify(submissionExamples.unclassified))]);
+  await state.run();
+  assert.ok(state.assessment());
+  assert.equal(state.model.calls.length, 1);
+  assert.equal(state.queries.length, 1);
+  assert.equal(state.events.filter(event => event.event === 'research_tool_requested').length, 2);
+  assert.ok(state.events.some(event => event.event === 'assessment_response_recovered' && event.format === 'structured_json'));
 });
 
 test('one on-demand evidence read is allowed, then only the final assessment tool remains', async () => {

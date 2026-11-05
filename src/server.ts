@@ -42,6 +42,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
             await pauseVm();
           } catch (pauseError) {
             console.error('VM pause failed on server shutdown:', pauseError);
+            process.exitCode ??= 2;
           }
         }
       });

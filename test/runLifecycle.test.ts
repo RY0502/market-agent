@@ -1,8 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAgentBootstrap, type AgentBootstrapDependencies } from '../src/bootstrap.js';
-import { runWithFinalizer } from '../src/services/runLifecycle.js';
-import { buildVmPauseUrl, pauseVm } from '../src/services/vmPauseService.js';
+import { runAgentBootstrap, reportBootstrapFailure, type AgentBootstrapDependencies } from '../src/bootstrap.js';
+import { RunFinalizationError, runWithFinalizer } from '../src/services/runLifecycle.js';
+import { buildVmPauseUrl, pauseVm, vmPauseTimeoutMs, VmPauseTimeoutError } from '../src/services/vmPauseService.js';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 function bootstrapDependencies(
   overrides: Partial<AgentBootstrapDependencies> = {},
@@ -85,10 +87,35 @@ describe('canonical agent lifecycle', () => {
 
   it('surfaces a pause failure after an otherwise successful run', async () => {
     const pauseError = new Error('pause failed');
+    let runs = 0;
+    let finalizations = 0;
     await assert.rejects(runWithFinalizer({
-      run: async () => 'complete',
-      finalize: async () => { throw pauseError; },
-    }), (err: unknown) => err === pauseError);
+      run: async () => { runs++; return 'complete'; },
+      finalize: async () => { finalizations++; throw pauseError; },
+    }), (err: unknown) => err instanceof RunFinalizationError && err.runSucceeded && err.cause === pauseError);
+    assert.equal(runs, 1, 'A finalization failure must not repeat completed work');
+    assert.equal(finalizations, 1);
+  });
+
+  it('uses a distinct CLI failure status for pause finalization without relabeling successful work as a failed market run', () => {
+    const originalExitCode = process.exitCode;
+    const originalError = console.error;
+    const logs: unknown[][] = [];
+    console.error = (...args: unknown[]) => { logs.push(args); };
+    try {
+      reportBootstrapFailure(new RunFinalizationError(new VmPauseTimeoutError(10_000)));
+      assert.equal(process.exitCode, 2);
+      assert.match(String(logs[0]![0]), /invocation completed, but VM pause finalization failed/);
+      assert.ok(logs[0]![1] instanceof VmPauseTimeoutError);
+      assert.doesNotMatch(logs.map(args => String(args[0])).join(' '), /Run failed with error/);
+      logs.length = 0;
+      reportBootstrapFailure(new Error('Actual market run failed'));
+      assert.equal(process.exitCode, 1);
+      assert.match(String(logs[0]![0]), /Run failed with error/);
+    } finally {
+      process.exitCode = originalExitCode;
+      console.error = originalError;
+    }
   });
 });
 
@@ -170,7 +197,74 @@ describe('VM pause callback', () => {
       env: { PAUSE_BASE_URL: 'https://controller.example.test', MACHINE_NO: '42' },
       fetch: fetchMock as typeof fetch,
       timeoutMs: 5,
-    }), /request aborted/);
+    }), (error: unknown) => error instanceof VmPauseTimeoutError && error.timeoutMs === 5 &&
+      /remote pause outcome is unknown/.test(error.message));
     assert.equal(callCount, 1);
+  });
+
+  it('accepts 2xx headers without reading a body that stalls during VM shutdown', async () => {
+    let calls = 0;
+    let bodyReads = 0;
+    let signal: AbortSignal | undefined;
+    await pauseVm({
+      env: { PAUSE_BASE_URL: 'https://controller.example.test', MACHINE_NO: '42' },
+      timeoutMs: 20,
+      fetch: async (_input, init) => {
+        calls++;
+        signal = init!.signal!;
+        const response = new Response(new ReadableStream({
+          start(controller) {
+            signal!.addEventListener('abort', () => controller.error(signal!.reason), { once: true });
+          },
+        }), { status: 202 });
+        const read = response.arrayBuffer.bind(response);
+        response.arrayBuffer = () => { bodyReads++; return read(); };
+        return response;
+      },
+    });
+    assert.equal(calls, 1);
+    assert.equal(bodyReads, 0, 'Response body completion is not the pause acknowledgement contract');
+    assert.equal(signal!.aborted, true, 'Unused response transport is released after acknowledgement');
+  });
+
+  it('works with real HTTP response headers when the controller never finishes its body', async () => {
+    let calls = 0;
+    const server = createServer((_request, response) => {
+      calls++;
+      response.writeHead(202, { 'Content-Type': 'application/json' });
+      response.flushHeaders();
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP test server');
+      await pauseVm({
+        env: { PAUSE_BASE_URL: `http://127.0.0.1:${address.port}`, MACHINE_NO: 'fixture' },
+        timeoutMs: 1000,
+      });
+      assert.equal(calls, 1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
+  });
+
+  it('validates the configurable deadline before making requests and never retries unknown remote outcomes', async () => {
+    assert.equal(vmPauseTimeoutMs({}), 10_000);
+    assert.equal(vmPauseTimeoutMs({ VM_PAUSE_TIMEOUT_MS: '30000' }), 30_000);
+    assert.equal(vmPauseTimeoutMs({ VM_PAUSE_TIMEOUT_MS: '30000' }, 5000), 5000);
+    for (const value of ['0', '-1', '', 'NaN', '1.5', '2147483648']) {
+      await assert.rejects(pauseVm({
+        env: { PAUSE_BASE_URL: 'https://controller.example.test', MACHINE_NO: '42', VM_PAUSE_TIMEOUT_MS: value },
+        fetch: async () => { assert.fail('Invalid deadline must not send a pause request'); },
+      }), /VM pause timeout must be a positive integer/);
+    }
+    let calls = 0;
+    await assert.rejects(pauseVm({
+      env: { PAUSE_BASE_URL: 'https://controller.example.test', MACHINE_NO: '42' },
+      fetch: async () => { calls++; throw new TypeError('fetch failed'); },
+    }), /fetch failed/);
+    assert.equal(calls, 1, 'A request may already have paused the VM; it must not be replayed automatically');
   });
 });
