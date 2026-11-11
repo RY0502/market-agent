@@ -174,8 +174,8 @@ test('Neon reset precedes downloads and skips; reset failure prevents all later 
       if (resetFails) throw new Error('Neon reset unavailable');
     },
     request: async () => {
-      assert.deepEqual(events, ['reset']);
-      events.push('download');
+      assert.deepEqual(events.slice(0, 1), ['reset']);
+      if (!events.includes('download')) events.push('download');
       return new Response('', { status: 404 });
     },
     researcher: () => { throw new Error('Research must not start'); },

@@ -57,6 +57,17 @@ export function csv(date: string, rows = [equity({ date })]): string {
       row.high, row.low, row.volume, row.turnover].join(',')).join('\n');
 }
 
+export function secFullCsv(date: string, rows = [equity({ date })]): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const formattedDate = `${String(d.getUTCDate()).padStart(2, '0')}-${monthNames[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
+  return 'SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE, CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY, TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY, DELIV_PER\n' +
+    rows.map(row => [
+      row.symbol, 'EQ', formattedDate, row.close, row.close, row.high, row.low, row.close, row.close, row.close,
+      row.volume, (row.turnover / 100_000).toFixed(2), 100, 10, '50.00',
+    ].join(', ')).join('\n');
+}
+
 export function zipResponse(text: string): Response {
   return new Response(Buffer.from(zipSync({ 'bhav.csv': strToU8(text) })), { status: 200 });
 }

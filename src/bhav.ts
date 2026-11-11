@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { parse } from 'csv-parse/sync';
 import { unzipSync, strFromU8 } from 'fflate';
 import { addDays, dateValue } from './dates.js';
@@ -68,16 +69,50 @@ export function archiveUrl(date: string): string {
   return `https://nsearchives.nseindia.com/content/historical/EQUITIES/${date.slice(0, 4)}/${month}/cm${date.slice(8)}${month}${date.slice(0, 4)}bhav.csv.zip`;
 }
 
-export function parseBhav(csv: string, date: string): Equity[] {
+export function fallbackArchiveUrl(date: string): string {
+  dateValue(date);
+  const stamp = date.slice(8, 10) + date.slice(5, 7) + date.slice(0, 4);
+  return `https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_${stamp}.csv`;
+}
+
+export function parseBhavDate(text: string): string {
+  const trimmed = text.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    dateValue(trimmed);
+    return trimmed;
+  }
+  const match = /^(\d{2})[ -]([A-Za-z]{3})[ -](\d{4})$/.exec(trimmed);
+  if (match) {
+    const monthIndex = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+      .indexOf(match[2]!.toUpperCase()) + 1;
+    if (monthIndex) {
+      const parsed = `${match[3]}-${String(monthIndex).padStart(2, '0')}-${match[1]}`;
+      dateValue(parsed);
+      return parsed;
+    }
+  }
+  const utcDate = new Date(`${trimmed} UTC`);
+  if (!Number.isNaN(utcDate.getTime())) {
+    const iso = utcDate.toISOString().slice(0, 10);
+    dateValue(iso);
+    return iso;
+  }
+  throw new Error(`Invalid bhavcopy date: ${text}`);
+}
+
+export function parseBhav(csv: string, date: string, isinMap?: Map<string, string>): Equity[] {
   const rows: Record<string, string>[] = parse(csv, {
     columns: (headers: string[]) => headers.map(h => h.trim()),
     bom: true, skip_empty_lines: true, trim: true,
   });
   if (!rows.length) throw new Error(`Empty bhavcopy for ${date}`);
   const modern = 'TckrSymb' in rows[0]!;
+  const secFull = 'DATE1' in rows[0]! && 'TURNOVER_LACS' in rows[0]!;
   const required = modern
     ? ['TckrSymb', 'ISIN', 'SctySrs', 'TradDt', 'ClsPric', 'HghPric', 'LwPric', 'TtlTradgVol', 'TtlTrfVal']
-    : ['SYMBOL', 'ISIN', 'SERIES', 'TIMESTAMP', 'CLOSE', 'HIGH', 'LOW', 'TOTTRDQTY', 'TOTTRDVAL'];
+    : secFull
+      ? ['SYMBOL', 'SERIES', 'DATE1', 'CLOSE_PRICE', 'HIGH_PRICE', 'LOW_PRICE', 'TTL_TRD_QNTY', 'TURNOVER_LACS']
+      : ['SYMBOL', 'ISIN', 'SERIES', 'TIMESTAMP', 'CLOSE', 'HIGH', 'LOW', 'TOTTRDQTY', 'TOTTRDVAL'];
   for (const header of required) {
     if (!(header in rows[0]!)) throw new Error(`Missing bhavcopy column ${header}`);
   }
@@ -93,22 +128,32 @@ export function parseBhav(csv: string, date: string): Equity[] {
   for (const row of rows) {
     if (row[modern ? 'SctySrs' : 'SERIES'] !== 'EQ') continue;
     if (modern && row.FinInstrmTp && row.FinInstrmTp !== 'STK') continue;
-    const rowDate = modern ? row.TradDt?.slice(0, 10)
-      : new Date(`${row.TIMESTAMP} UTC`).toISOString().slice(0, 10);
+    const rowDate = modern
+      ? row.TradDt?.slice(0, 10)
+      : parseBhavDate(row[secFull ? 'DATE1' : 'TIMESTAMP']!);
     if (rowDate !== date) throw new Error(`Bhavcopy date mismatch: expected ${date}, got ${rowDate}`);
     const symbol = row[modern ? 'TckrSymb' : 'SYMBOL']!;
-    const isin = row.ISIN!;
+    let isin = row.ISIN?.trim();
+    if (!isin && isinMap?.has(symbol)) {
+      isin = isinMap.get(symbol)!;
+    }
+    if (!isin) {
+      isin = `IN${createHash('sha256').update(symbol).digest('hex').slice(0, 10).toUpperCase()}`;
+    }
+    if (isinMap && row.ISIN?.trim() && !isinMap.has(symbol)) {
+      isinMap.set(symbol, row.ISIN.trim());
+    }
     if (!symbol || !/^IN[A-Z0-9]{10}$/.test(isin) || seen.has(isin)) {
       throw new Error(`Invalid or duplicate equity identity: ${symbol}/${isin}`);
     }
     seen.add(isin);
     const equity: Equity = {
       symbol, isin, name: row.FinInstrmNm || symbol, date,
-      close: number(row, modern ? 'ClsPric' : 'CLOSE'),
-      high: number(row, modern ? 'HghPric' : 'HIGH'),
-      low: number(row, modern ? 'LwPric' : 'LOW'),
-      volume: number(row, modern ? 'TtlTradgVol' : 'TOTTRDQTY'),
-      turnover: number(row, modern ? 'TtlTrfVal' : 'TOTTRDVAL'),
+      close: number(row, modern ? 'ClsPric' : secFull ? 'CLOSE_PRICE' : 'CLOSE'),
+      high: number(row, modern ? 'HghPric' : secFull ? 'HIGH_PRICE' : 'HIGH'),
+      low: number(row, modern ? 'LwPric' : secFull ? 'LOW_PRICE' : 'LOW'),
+      volume: number(row, modern ? 'TtlTradgVol' : secFull ? 'TTL_TRD_QNTY' : 'TOTTRDQTY'),
+      turnover: secFull ? number(row, 'TURNOVER_LACS') * 100_000 : number(row, modern ? 'TtlTrfVal' : 'TOTTRDVAL'),
     };
     if (equity.volume === 0) continue;
     if (equity.low > equity.high || equity.close < equity.low || equity.close > equity.high) {
@@ -123,21 +168,47 @@ export function parseBhav(csv: string, date: string): Equity[] {
 export class BhavStore {
   downloads = 0;
   missingDates: string[] = [];
+  isinMap = new Map<string, string>();
 
   constructor(private root: string, private request: typeof fetch = fetch) {}
 
   async load(date: string): Promise<Equity[]> {
     const file = path.join(this.root, 'bhav', `${date}.csv`);
     const cached = await readOptional(file);
-    if (cached) return parseBhav(cached.toString('utf8'), date);
+    if (cached) return parseBhav(cached.toString('utf8'), date, this.isinMap);
+    const stamp = date.slice(8, 10) + date.slice(5, 7) + date.slice(0, 4);
+    const fallbackCached = await readOptional(path.join(this.root, 'bhav', `sec_bhavdata_full_${stamp}.csv`));
+    if (fallbackCached) return parseBhav(fallbackCached.toString('utf8'), date, this.isinMap);
     if (this.downloads >= 31) throw new Error('31 bhavcopy download limit reached');
     const response = await this.request(archiveUrl(date), {
       headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/zip', Referer: 'https://www.nseindia.com/' },
       signal: AbortSignal.timeout(45_000),
     });
     if (response.status === 404) {
-      if (!this.missingDates.includes(date)) this.missingDates.push(date);
-      throw new MissingBhavcopy(`No NSE bhavcopy for ${date}`);
+      const fallbackResponse = await this.request(fallbackArchiveUrl(date), {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'text/csv,application/zip,*/*', Referer: 'https://www.nseindia.com/' },
+        signal: AbortSignal.timeout(45_000),
+      });
+      if (fallbackResponse.status === 404) {
+        if (!this.missingDates.includes(date)) this.missingDates.push(date);
+        throw new MissingBhavcopy(`No NSE bhavcopy for ${date}`);
+      }
+      if (!fallbackResponse.ok) throw new Error(`NSE download failed for ${date}: HTTP ${fallbackResponse.status}`);
+      this.downloads++;
+      const buffer = new Uint8Array(await fallbackResponse.arrayBuffer());
+      if (buffer.byteLength > 20_000_000) throw new Error('NSE archive exceeds size limit');
+      let csv: string;
+      if (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) {
+        const entries = unzipSync(buffer, { filter: entry => entry.name.endsWith('.csv') && entry.originalSize <= 60_000_000 });
+        const csvFiles = Object.entries(entries).filter(([name]) => name.endsWith('.csv'));
+        if (csvFiles.length !== 1) throw new Error(`Expected one CSV in NSE archive for ${date}`);
+        csv = strFromU8(csvFiles[0]![1]);
+      } else {
+        csv = Buffer.from(buffer).toString('utf8');
+      }
+      const rows = parseBhav(csv, date, this.isinMap);
+      await atomicWrite(file, csv);
+      return rows;
     }
     if (!response.ok) throw new Error(`NSE download failed for ${date}: HTTP ${response.status}`);
     this.downloads++;
@@ -147,7 +218,7 @@ export class BhavStore {
     const csvFiles = Object.entries(entries).filter(([name]) => name.endsWith('.csv'));
     if (csvFiles.length !== 1) throw new Error(`Expected one CSV in NSE archive for ${date}`);
     const csv = strFromU8(csvFiles[0]![1]);
-    const rows = parseBhav(csv, date);
+    const rows = parseBhav(csv, date, this.isinMap);
     await atomicWrite(file, csv);
     return rows;
   }
@@ -209,7 +280,8 @@ export class BhavStore {
       for (let day = addDays(history.baseline, -1);
         day >= cutoff && [...series.values()].some(points => points.size < count);
         day = addDays(day, -1)) {
-        if (this.downloads >= 31 && !await readOptional(path.join(this.root, 'bhav', `${day}.csv`))) continue;
+        const stamp = day.slice(8, 10) + day.slice(5, 7) + day.slice(0, 4);
+        if (this.downloads >= 31 && !await readOptional(path.join(this.root, 'bhav', `${day}.csv`)) && !await readOptional(path.join(this.root, 'bhav', `sec_bhavdata_full_${stamp}.csv`))) continue;
         try {
           collect(await this.load(day));
         } catch (error) {

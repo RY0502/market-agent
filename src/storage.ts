@@ -52,6 +52,13 @@ export async function prune(root: string, today: string): Promise<void> {
       if (entry.isFile() && match?.[1] && match[1] < cutoff) {
         await unlink(path.join(root, dir, entry.name));
       }
+      const secMatch = /^sec_bhavdata_full_(\d{2})(\d{2})(\d{4})\.csv$/.exec(entry.name);
+      if (entry.isFile() && secMatch) {
+        const secDate = `${secMatch[3]}-${secMatch[2]}-${secMatch[1]}`;
+        if (secDate < cutoff) {
+          await unlink(path.join(root, dir, entry.name));
+        }
+      }
     }
   }
 }

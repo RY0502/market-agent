@@ -15,7 +15,9 @@ test('charts collect latest trading closes by ISIN across weekends/holidays and 
   try {
     await initializeStorage(root);
     const store = new BhavStore(root, async input => {
-      const compact = /_(\d{8})_F_/.exec(String(input))![1]!;
+      const match = /_(\d{8})_F_/.exec(String(input));
+      if (!match) return new Response('', { status: 404 });
+      const compact = match[1]!;
       const date = `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6)}`;
       if (!trading.includes(date)) return new Response('', { status: 404 });
       downloads++;
@@ -44,7 +46,9 @@ test('short windows backfill earlier trading observations; download cap returns 
   try {
     await initializeStorage(root);
     const store = new BhavStore(root, async input => {
-      const compact = /_(\d{8})_F_/.exec(String(input))![1]!;
+      const match = /_(\d{8})_F_/.exec(String(input));
+      if (!match) return new Response('', { status: 404 });
+      const compact = match[1]!;
       const date = `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6)}`;
       requested.push(date);
       return date === '2026-10-23' ? zipResponse(csv(date)) : new Response('', { status: 404 });
