@@ -206,9 +206,23 @@ export class BhavStore {
       } else {
         csv = Buffer.from(buffer).toString('utf8');
       }
-      const rows = parseBhav(csv, date, this.isinMap);
-      await atomicWrite(file, csv);
-      return rows;
+      if (csv.trim().startsWith('<') || csv.trim().startsWith('<!DOCTYPE')) {
+        this.downloads--;
+        if (!this.missingDates.includes(date)) this.missingDates.push(date);
+        throw new MissingBhavcopy(`No NSE bhavcopy for ${date}`);
+      }
+      try {
+        const rows = parseBhav(csv, date, this.isinMap);
+        await atomicWrite(file, csv);
+        return rows;
+      } catch (err) {
+        if (err instanceof Error && (err.message.includes('Bhavcopy date mismatch') || err.message.includes('No EQ equities'))) {
+          this.downloads--;
+          if (!this.missingDates.includes(date)) this.missingDates.push(date);
+          throw new MissingBhavcopy(`No NSE bhavcopy for ${date}`);
+        }
+        throw err;
+      }
     }
     if (!response.ok) throw new Error(`NSE download failed for ${date}: HTTP ${response.status}`);
     this.downloads++;
