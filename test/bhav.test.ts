@@ -47,6 +47,36 @@ test('configured day duration changes the baseline and qualifying movement while
   } finally { await rm(root, { recursive: true }); }
 });
 
+test('short lookback over weekends/holidays selects latest prior trading day instead of falling back to oldest 30-day date', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'holiday-lookback-'));
+  // Wednesday 2026-11-11; Tuesday 2026-11-10 was a market holiday
+  const date = '2026-11-11';
+  const tradingDays = ['2026-10-12', '2026-11-06', '2026-11-09', '2026-11-11'];
+  const store = new BhavStore(root, async input => {
+    const compact = /_(\d{8})_F_/.exec(String(input))?.[1];
+    if (!compact) return new Response('', { status: 404 });
+    const day = `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
+    if (!tradingDays.includes(day)) return new Response('', { status: 404 });
+    return zipResponse(csv(day, [equity({
+      date: day, close: day === date ? 500 : 450,
+      high: day === date ? 520 : 460, low: 400,
+    })]));
+  });
+  try {
+    await initializeStorage(root);
+    const oneDayConfig = loadScreeningConfig({ LOOKBACK_DAYS: '1' });
+    const history = await store.history(date, oneDayConfig);
+    // Baseline should be the latest trading day prior to screenTarget (2026-11-09), NOT 30 days ago (2026-10-12)
+    assert.equal(history.baseline, '2026-11-09');
+    assert.equal(history.days.length, 2);
+    assert.equal(history.days[0]![0]!.date, '2026-11-09');
+    const candidates = screen(history, oneDayConfig);
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0]!.baselineDate, '2026-11-09');
+    assert.equal(candidates[0]!.asOfDate, '2026-11-11');
+  } finally { await rm(root, { recursive: true }); }
+});
+
 test('official modern and legacy URL conventions and fallback URL', () => {
   assert.equal(archiveUrl('2026-10-26'), 'https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261026_F_0000.csv.zip');
   assert.equal(archiveUrl('2024-01-02'), 'https://nsearchives.nseindia.com/content/historical/EQUITIES/2024/JAN/cm02JAN2024bhav.csv.zip');

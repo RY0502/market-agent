@@ -264,7 +264,7 @@ export class BhavStore {
       }
     }
     if (!baseline && loadedDays.size > 0) {
-      baseline = [...loadedDays.keys()][0];
+      baseline = [...loadedDays.keys()].at(-1);
     }
     if (!baseline) throw new UnavailableHistory(`No historical bhavcopy available on or after ${target} and before ${date}; ${settings.lookbackDays}-day comparison skipped`);
     const days: Equity[][] = [];
