@@ -46,33 +46,48 @@ test('only missing/disputed fundamentals trigger TradingView; unsure alone is no
   assert.doesNotMatch(tradingViewPrompt('EXAMPLE'), /pros|cons/i);
 });
 
-test('the scrape request uses the exact TradingView NSE URL and retries 429 once after 45 seconds', async () => {
+test('the scrape request uses the exact TradingView NSE URL and retries 429 with static backoff and jitter', async () => {
   const calls: { url: string; prompt: string }[] = [];
   const sleeps: number[] = [];
+  const mockJitter = () => 2_500;
   const page = await scrapeTradingView('EXAMPLE', async (_url, init) => {
     calls.push(JSON.parse(String(init?.body)));
     return calls.length === 1 ? new Response('', { status: 429 }) : new Response(output);
-  }, async ms => { sleeps.push(ms); });
+  }, async ms => { sleeps.push(ms); }, mockJitter);
   assert.equal(page.url, 'https://in.tradingview.com/symbols/NSE-EXAMPLE/');
-  assert.deepEqual(sleeps, [45_000]);
+  assert.deepEqual(sleeps, [42_500]);
   assert.equal(calls.length, 2);
   assert.equal(calls[0]!.url, page.url);
   assert.match(calls[0]!.prompt, /earnings Ratio \(TTM\)/);
 });
 
-test('network failures retry only once; other failures and invalid symbols do not retry', async () => {
+test('the scrape request retries 429 up to concurrency - 1 times with static backoff before throwing', async () => {
+  let calls = 0;
+  const sleeps: number[] = [];
+  const mockJitter = () => 1_000;
+  // Test with explicit retryLimit = 2 (or default concurrency - 1)
+  await assert.rejects(scrapeTradingView('EXAMPLE', async () => {
+    calls++;
+    return new Response('', { status: 429 });
+  }, async ms => { sleeps.push(ms); }, mockJitter, 2), /Vision scrape HTTP 429/);
+  assert.equal(calls, 3); // initial attempt + 2 retries
+  assert.deepEqual(sleeps, [41_000, 41_000]); // static 40s + 1s jitter each time
+});
+
+test('network failures retry and other failures do not retry', async () => {
   let calls = 0;
   const waits: number[] = [];
   const sleep = async (ms: number) => { waits.push(ms); };
+  const mockJitter = () => 0;
   await assert.rejects(scrapeTradingView('EXAMPLE', async () => {
     calls++; throw new TypeError('fetch failed');
-  }, sleep));
-  assert.equal(calls, 2);
-  assert.deepEqual(waits, [45_000]);
+  }, sleep, mockJitter, 2));
+  assert.equal(calls, 3); // initial attempt + 2 retries
+  assert.deepEqual(waits, [40_000, 40_000]);
   calls = 0;
-  await assert.rejects(scrapeTradingView('EXAMPLE', async () => { calls++; return new Response('', { status: 403 }); }, sleep));
+  await assert.rejects(scrapeTradingView('EXAMPLE', async () => { calls++; return new Response('', { status: 403 }); }, sleep, mockJitter, 2));
   assert.equal(calls, 1);
-  await assert.rejects(scrapeTradingView('../OTHER', async () => { throw new Error('must not call'); }, sleep), /Invalid NSE symbol/);
+  await assert.rejects(scrapeTradingView('../OTHER', async () => { throw new Error('must not call'); }, sleep, mockJitter, 2), /Invalid NSE symbol/);
 });
 
 test('extraction accepts numeric values and normalizes missing key statistics', () => {

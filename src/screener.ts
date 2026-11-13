@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { CONFIG } from 'freetier-deepagent-framework';
 import { z } from 'zod';
 import { normalizeMetricText } from './financial-metrics.js';
-import { isResearchNetworkError, researchLimitsSchema } from './research-control.js';
+import { isResearchNetworkError, researchConcurrencySchema, researchLimitsSchema } from './research-control.js';
 import { runResearchProcess } from './research-process.js';
 import { validateAssessment, type RankedStock, type ResearchResult } from './research.js';
 
@@ -54,32 +54,55 @@ export function parseScreenerOutput(output: string, symbol: string): z.infer<typ
   throw new Error('Invalid Screener extraction');
 }
 
-/** Scrape one page with a single delayed retry only for rate limits or network failures. */
+let screenerScrapeQueue: Promise<unknown> = Promise.resolve();
+
+export function enqueueScreenerScrape<T>(fn: () => Promise<T>): Promise<T> {
+  const next = screenerScrapeQueue.catch(() => {}).then(fn);
+  screenerScrapeQueue = next;
+  return next;
+}
+
+/** Scrape one page with serialization, static backoff (40s + jitter), and retries based on configured concurrency - 1. */
 export async function scrapeScreener(
-  symbol: string, request: typeof fetch = fetch, sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  symbol: string,
+  request: typeof fetch = fetch,
+  sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  getJitter: () => number = () => Math.floor(Math.random() * 15_000),
+  retryLimit?: number,
 ): Promise<{ url: string; output: string; observedAt: string }> {
   if (!/^[A-Za-z0-9][A-Za-z0-9&_-]*$/.test(symbol)) throw new Error('Invalid NSE symbol for Screener');
   const url = `https://www.screener.in/company/${encodeURIComponent(symbol)}/consolidated/`;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const response = await request(`${CONFIG.SCRAPE_AGENT_URL}/extract`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, prompt: screenerPrompt(symbol) }), signal: AbortSignal.timeout(60_000),
-      });
-      if (!response.ok) {
-        const error = Object.assign(new Error(`Vision scrape HTTP ${response.status}`), { status: response.status });
-        throw error;
+
+  return enqueueScreenerScrape(async () => {
+    const concurrency = researchConcurrencySchema.parse(process.env.RESEARCH_CONCURRENCY);
+    const maxRetries = retryLimit ?? Math.max(1, concurrency - 1);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await request(`${CONFIG.SCRAPE_AGENT_URL}/extract`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, prompt: screenerPrompt(symbol) }), signal: AbortSignal.timeout(60_000),
+        });
+        if (!response.ok) {
+          const error = Object.assign(new Error(`Vision scrape HTTP ${response.status}`), { status: response.status });
+          throw error;
+        }
+        const output = await response.text();
+        parseScreenerOutput(output, symbol);
+        return { url, output, observedAt: new Date().toISOString() };
+      } catch (error) {
+        const status = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+        const timeout = error instanceof Error && error.name === 'TimeoutError';
+        const isRateLimit = status === 429;
+        const isNetwork = timeout || isResearchNetworkError(error);
+        if (attempt >= maxRetries || (!isRateLimit && !isNetwork)) throw error;
+
+        // Static backoff of 40s + random jitter each time
+        const baseDelay = 40_000;
+        const jitter = getJitter();
+        await sleep(baseDelay + jitter);
       }
-      const output = await response.text();
-      parseScreenerOutput(output, symbol);
-      return { url, output, observedAt: new Date().toISOString() };
-    } catch (error) {
-      const status = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
-      const timeout = error instanceof Error && error.name === 'TimeoutError';
-      if (attempt || !(status === 429 || timeout || isResearchNetworkError(error))) throw error;
-      await sleep(45_000);
     }
-  }
+  });
 }
 
 /** Attach only missing NSE metrics, retaining the exact captured scrape as evidence. */

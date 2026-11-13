@@ -37,33 +37,35 @@ test('only missing NSE figures or an unsure assessment trigger enrichment', () =
   assert.match(screenerPrompt('EXAMPLE'), /pros.*cons/i);
 });
 
-test('the scrape request uses the exact consolidated URL and retries 429 once after 45 seconds', async () => {
+test('the scrape request uses the exact consolidated URL and retries 429 with static backoff and jitter', async () => {
   const calls: { url: string; prompt: string }[] = [];
   const sleeps: number[] = [];
+  const mockJitter = () => 2_500;
   const page = await scrapeScreener('EXAMPLE', async (_url, init) => {
     calls.push(JSON.parse(String(init?.body)));
     return calls.length === 1 ? new Response('', { status: 429 }) : new Response(output);
-  }, async ms => { sleeps.push(ms); });
+  }, async ms => { sleeps.push(ms); }, mockJitter);
   assert.equal(page.url, 'https://www.screener.in/company/EXAMPLE/consolidated/');
-  assert.deepEqual(sleeps, [45_000]);
+  assert.deepEqual(sleeps, [42_500]);
   assert.equal(calls.length, 2);
   assert.equal(calls[0]!.url, page.url);
   assert.match(calls[0]!.prompt, /Stock P\/E/);
 });
 
-test('network failures retry only once; other failures and invalid symbols do not retry', async () => {
+test('network failures retry and other failures do not retry', async () => {
   let calls = 0;
   const waits: number[] = [];
   const sleep = async (ms: number) => { waits.push(ms); };
+  const mockJitter = () => 0;
   await assert.rejects(scrapeScreener('EXAMPLE', async () => {
     calls++; throw new TypeError('fetch failed');
-  }, sleep));
-  assert.equal(calls, 2);
-  assert.deepEqual(waits, [45_000]);
+  }, sleep, mockJitter, 2));
+  assert.equal(calls, 3); // initial attempt + 2 retries
+  assert.deepEqual(waits, [40_000, 40_000]);
   calls = 0;
-  await assert.rejects(scrapeScreener('EXAMPLE', async () => { calls++; return new Response('', { status: 403 }); }, sleep));
+  await assert.rejects(scrapeScreener('EXAMPLE', async () => { calls++; return new Response('', { status: 403 }); }, sleep, mockJitter, 2));
   assert.equal(calls, 1);
-  await assert.rejects(scrapeScreener('../OTHER', async () => { throw new Error('must not call'); }, sleep), /Invalid NSE symbol/);
+  await assert.rejects(scrapeScreener('../OTHER', async () => { throw new Error('must not call'); }, sleep, mockJitter, 2), /Invalid NSE symbol/);
 });
 
 test('extraction verifies stock identity, units, and never overwrites current or historical NSE values', () => {
