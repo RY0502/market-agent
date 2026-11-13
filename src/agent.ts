@@ -44,7 +44,7 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<Job> {
           milvusService: milvus,
         });
       } catch (err) {
-        console.warn('[Agent] Prediction evaluation warning:', err);
+        console.warn('[Agent] Prediction evaluation encountered an error, continuing without failing:', err);
       }
     },
   });

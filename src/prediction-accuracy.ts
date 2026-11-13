@@ -209,28 +209,29 @@ export async function evaluatePreviousRun(
   for (let i = 0; i < candidatesToEvaluate.length; i += batchSize) {
     const batch = candidatesToEvaluate.slice(i, i + batchSize);
     await Promise.all(batch.map(async ({ row, symbol, equity: eq, gainPct, isCorrect }) => {
-      if (isCorrect) correctCount++;
-
-      const itemResult: PredictionEvaluationResult = {
-        symbol,
-        name: row.name,
-        predictedProbability: row.profit_probability!,
-        prevClose: row.price,
-        currentHigh: eq.high,
-        gainPct: Math.round(gainPct * 100) / 100,
-        isCorrect,
-      };
-
       try {
-        // Search Exa for news/events explaining why the stock moved
-        const exaQuery = `"${row.name}" (${symbol}) NSE India business news contract acquisition earnings results`;
-        const news = await searchExa(exaQuery).catch(() => []);
-        const newsSnippets = news
-          .map(n => n.title ? `${n.title}: ${n.text}` : n.text)
-          .join('\n---\n')
-          .slice(0, 3000);
+        if (isCorrect) correctCount++;
 
-        const prompt = `You are a financial market analyst extracting generalizable trading patterns.
+        const itemResult: PredictionEvaluationResult = {
+          symbol,
+          name: row.name,
+          predictedProbability: row.profit_probability!,
+          prevClose: row.price,
+          currentHigh: eq.high,
+          gainPct: Math.round(gainPct * 100) / 100,
+          isCorrect,
+        };
+
+        try {
+          // Search Exa for news/events explaining why the stock moved
+          const exaQuery = `"${row.name}" (${symbol}) NSE India business news contract acquisition earnings results`;
+          const news = await searchExa(exaQuery).catch(() => []);
+          const newsSnippets = news
+            .map(n => n.title ? `${n.title}: ${n.text}` : n.text)
+            .join('\n---\n')
+            .slice(0, 3000);
+
+          const prompt = `You are a financial market analyst extracting generalizable trading patterns.
 Stock: ${row.name} (${symbol})
 Previous Close: INR ${row.price}
 Current High: INR ${eq.high} (Intraday move: ${gainPct >= 0 ? '+' : ''}${gainPct.toFixed(2)}%)
@@ -249,37 +250,40 @@ Return ONLY a JSON object:
   "category": "M&A | Order Win | Earnings Surprise | Geopolitical | Regulatory | Macroeconomic | Technical Momentum"
 }`;
 
-        const llmResponse = await runLlm({ prompt });
-        const textOutput = typeof llmResponse === 'string' ? llmResponse : llmResponse.text ?? '';
-        const cleaned = textOutput.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1');
-        const parsed = JSON.parse(cleaned);
+          const llmResponse = await runLlm({ prompt });
+          const textOutput = typeof llmResponse === 'string' ? llmResponse : llmResponse.text ?? '';
+          const cleaned = textOutput.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1');
+          const parsed = JSON.parse(cleaned);
 
-        if (parsed.observation && typeof parsed.observation === 'string' && parsed.observation.length >= 20) {
-          const observation = parsed.observation.trim();
-          const category = String(parsed.category || 'General').trim();
-          itemResult.observation = observation;
-          itemResult.category = category;
+          if (parsed.observation && typeof parsed.observation === 'string' && parsed.observation.length >= 20) {
+            const observation = parsed.observation.trim();
+            const category = String(parsed.category || 'General').trim();
+            itemResult.observation = observation;
+            itemResult.category = category;
 
-          if (options.milvusService) {
-            const vector = await embeddings.embedQuery(observation);
-            const matchedInsight = await options.milvusService.searchInsight(vector, 1, similarityThreshold);
+            if (options.milvusService) {
+              const vector = await embeddings.embedQuery(observation);
+              const matchedInsight = await options.milvusService.searchInsight(vector, 1, similarityThreshold);
 
-            if (matchedInsight) {
-              await options.milvusService.fortifyInsight(matchedInsight, symbol, options.currentDate, observation, vector);
-              itemResult.fortified = true;
-              fortifiedCount++;
-            } else {
-              await options.milvusService.insertInsight(vector, observation, category, options.currentDate, symbol);
-              itemResult.inserted = true;
-              insertedCount++;
+              if (matchedInsight) {
+                await options.milvusService.fortifyInsight(matchedInsight, symbol, options.currentDate, observation, vector);
+                itemResult.fortified = true;
+                fortifiedCount++;
+              } else {
+                await options.milvusService.insertInsight(vector, observation, category, options.currentDate, symbol);
+                itemResult.inserted = true;
+                insertedCount++;
+              }
             }
           }
+        } catch (err) {
+          console.warn(`[Prediction Accuracy] Failed to extract/vectorize insight for ${symbol}, skipping stock:`, err);
         }
-      } catch (err) {
-        console.warn(`[Prediction Accuracy] Failed to extract/vectorize insight for ${symbol}:`, err);
-      }
 
-      results.push(itemResult);
+        results.push(itemResult);
+      } catch (stockErr) {
+        console.warn(`[Prediction Accuracy] Error evaluating stock ${symbol}, skipping:`, stockErr);
+      }
     }));
   }
 

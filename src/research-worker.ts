@@ -1,4 +1,5 @@
 import { CONFIG, DatabaseClient } from 'freetier-deepagent-framework';
+import './neon.js';
 import { z } from 'zod';
 import type { Candidate } from './bhav.js';
 import { createInProcessResearcher, type CachedResearchContext, type ResearchResult } from './research.js';
