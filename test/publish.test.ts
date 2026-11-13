@@ -8,7 +8,7 @@ import { initializeStorage } from '../src/storage.js';
 import { candidate, research, reportReference } from './helpers.js';
 
 const stock = () => ({ candidate: candidate(), research: research(), riskScore: 20, recoveryScore: 80, rank: 1, report: reportReference() });
-const displayKeys = ['change', 'change_percent', 'insight_fortified', 'name', 'price', 'profit_probability', 'report_url', 'updated_at'];
+const displayKeys = ['change', 'change_percent', 'name', 'price', 'profit_probability', 'report_url', 'short_term_gain_potential', 'updated_at'];
 
 test('missing, expired or non-HTTPS report references prevent all Supabase operations', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'report-publish-'));
@@ -33,6 +33,13 @@ test('publication payload contains only display columns, never reasons or metada
   const row = publicationRow(stock(), '2026-10-27T12:00:00Z');
   assert.deepEqual(Object.keys(row).sort(), displayKeys);
   assert.equal(row.profit_probability, 'high');
+  assert.equal(row.short_term_gain_potential, true);
+
+  const lowStock = { ...stock(), research: research('EXAMPLE', { profitProbability: 'low' }) };
+  assert.equal(publicationRow(lowStock, '2026-10-27T12:00:00Z').short_term_gain_potential, false);
+
+  const loserStock = { ...stock(), candidate: { ...stock().candidate, group: 'losers' as const } };
+  assert.equal(publicationRow(loserStock, '2026-10-27T12:00:00Z').short_term_gain_potential, false);
 });
 
 test('publication payload rounds change_percent to 2 decimal places maximum for gainers and losers', () => {

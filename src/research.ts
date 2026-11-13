@@ -708,13 +708,34 @@ export function createResearcher(root: string, runId: string): Researcher {
     if (milvus && !candidate.insightFortified) {
       try {
         const emb = new FreeTierEmbeddings();
-        const queryText = `${candidate.name} ${candidate.symbol} ${candidate.group === 'gainers' ? 'rally momentum positive earnings contract acquisition price movement profit accuracy threshold' : 'selling pressure risk decline'} market catalyst`;
-        const vec = await emb.embedQuery(queryText);
-        const match = await milvus.searchInsight(vec);
-        if (match) {
-          candidate.insightFortified = match.fortification_count;
-          candidate.insightText = match.text;
-          console.log(`[Research] Candidate ${candidate.symbol} matched fortified insight (${match.fortification_count}x): "${match.text.slice(0, 70)}..."`);
+
+        // 1. Query Milvus specifically for short-term price movement facts
+        const stQuery = `${candidate.name} ${candidate.symbol} short-term price movement profit accuracy threshold historical bhavcopy`;
+        const stVec = await emb.embedQuery(stQuery);
+        const stMatch = await milvus.searchInsight(stVec, 1, 0.78, 'short_term');
+
+        // 2. Query Milvus specifically for monthly/long-term trend facts
+        const mtQuery = `${candidate.name} ${candidate.symbol} brand institutional liquidity 30-day positional trend compounder secular tailwind`;
+        const mtVec = await emb.embedQuery(mtQuery);
+        const mtMatch = await milvus.searchInsight(mtVec, 1, 0.78, 'monthly');
+
+        if (stMatch) {
+          candidate.shortTermGuidance = stMatch.text;
+          console.log(`[Research] Candidate ${candidate.symbol} matched short-term fact (${stMatch.fortification_count}x): "${stMatch.text.slice(0, 70)}..."`);
+        }
+        if (mtMatch) {
+          candidate.monthlyGuidance = mtMatch.text;
+          console.log(`[Research] Candidate ${candidate.symbol} matched monthly fact (${mtMatch.fortification_count}x): "${mtMatch.text.slice(0, 70)}..."`);
+        }
+
+        const maxFortified = Math.max(stMatch?.fortification_count ?? 0, mtMatch?.fortification_count ?? 0);
+        if (maxFortified > 0) {
+          candidate.insightFortified = maxFortified;
+          const combined = [
+            stMatch ? `[Short-Term Fact]: ${stMatch.text}` : '',
+            mtMatch ? `[Monthly Fact]: ${mtMatch.text}` : '',
+          ].filter(Boolean).join('\n');
+          candidate.insightText = combined;
         }
       } catch (err) {
         console.warn(`[Research] Milvus lookup warning for ${candidate.symbol}:`, err);
@@ -894,11 +915,15 @@ Candidate: ${JSON.stringify(candidate)}
 Prior assessment: ${JSON.stringify(prior.assessment)}
 Previously captured evidence (including Tavily, Exa and any TradingView extraction): ${JSON.stringify(evidence.catalog().map(read =>
   read.cachedAt ? { ...read, content: qualitativeCachedText(read.content) } : read))}
-${candidate.insightFortified && candidate.insightText ? `\nFACT GUIDANCE & HISTORICAL PATTERN (${candidate.insightFortified}x observed/fortified): "${candidate.insightText}". Factor this verified price movement fact and profit accuracy from historical data files into your assessment and risks in layman-friendly language.\n` : ''}
+${candidate.shortTermGuidance ? `\nVERIFIED SHORT-TERM FACT GUIDANCE (Next-Week Horizon from Data Files): "${candidate.shortTermGuidance}"\nFactor this verified short-term price movement and profit accuracy into next week's profit probability and short-term gain potential.\n` : ''}
+${candidate.monthlyGuidance ? `\nVERIFIED MONTHLY FACT GUIDANCE (30-Day Positional Horizon): "${candidate.monthlyGuidance}"\nFactor this verified monthly trend and brand/institutional insight into the trend profile and safety assessment.\n` : ''}
+${!candidate.shortTermGuidance && !candidate.monthlyGuidance && candidate.insightFortified && candidate.insightText ? `\nFACT GUIDANCE & HISTORICAL PATTERN (${candidate.insightFortified}x observed/fortified): "${candidate.insightText}". Factor this verified empirical insight into your assessment and risks in layman-friendly language.\n` : ''}
 Reassess using only this evidence and submit the final assessment. Factor traded liquidity, brand strength, institutional sponsorship and structural thematic tailwinds into the decision.` : `Research run ${runId}; fresh evaluation at ${new Date().toISOString()}.
 ${cached ? 'Use the constrained cache-hit refresh path; the application supplies compact context before assessment.' : ''}
 Bhavcopy screen (historical comparison, research is CURRENT not a backtest): ${JSON.stringify(candidate)}
-${candidate.insightFortified && candidate.insightText ? `\nFACT GUIDANCE & HISTORICAL PATTERN (${candidate.insightFortified}x observed/fortified): "${candidate.insightText}". Factor this verified price movement fact and profit accuracy from historical data files into your assessment and risks in layman-friendly language.\n` : ''}
+${candidate.shortTermGuidance ? `\nVERIFIED SHORT-TERM FACT GUIDANCE (Next-Week Horizon from Data Files): "${candidate.shortTermGuidance}"\nFactor this verified short-term price movement and profit accuracy into next week's profit probability and short-term gain potential.\n` : ''}
+${candidate.monthlyGuidance ? `\nVERIFIED MONTHLY FACT GUIDANCE (30-Day Positional Horizon): "${candidate.monthlyGuidance}"\nFactor this verified monthly trend and brand/institutional insight into the trend profile and safety assessment.\n` : ''}
+${!candidate.shortTermGuidance && !candidate.monthlyGuidance && candidate.insightFortified && candidate.insightText ? `\nFACT GUIDANCE & HISTORICAL PATTERN (${candidate.insightFortified}x observed/fortified): "${candidate.insightText}". Factor this verified empirical insight into your assessment and risks in layman-friendly language.\n` : ''}
 Classify the next trading week's long-investment profit outlook as low, medium, high or null
 if evidence is insufficient. Assess traded liquidity (turnover: INR ${(candidate.averageTurnover / 10_000_000).toFixed(2)} Cr), brand mindshare, institutional backing vs. speculative operator risk, catalysts and downside risks. Explain your reasoning in simple layman terms.
 Call submit_stock_assessment with evidence and explicit reasons.`);

@@ -7,6 +7,17 @@ import { ACTIVE_GROUPS } from './screening.js';
 
 export const MAX_HISTORY_ROWS = 750;
 
+export function hasShortTermGainPotential(stock: RankedStock): boolean {
+  if (stock.candidate.group !== 'gainers') return false;
+  const prob = stock.research.assessment.profitProbability;
+  if (prob === 'high') return true;
+  if (prob === 'medium') {
+    const risk = stock.riskScore ?? stock.research.assessment.fundamentalRisk;
+    return risk === null || risk <= 50;
+  }
+  return false;
+}
+
 export function publicationRow(stock: RankedStock, updatedAt: string) {
   const report = z.object({ url: z.string().url(), expiresAt: z.string().datetime() }).parse(stock.report);
   if (new URL(report.url).protocol !== 'https:' || Date.parse(report.expiresAt) <= Date.parse(updatedAt)) {
@@ -20,7 +31,7 @@ export function publicationRow(stock: RankedStock, updatedAt: string) {
     updated_at: updatedAt,
     profit_probability: stock.research.assessment.profitProbability,
     report_url: report.url,
-    insight_fortified: stock.candidate.insightFortified ?? (stock.research.assessment as any).insightFortified ?? 0,
+    short_term_gain_potential: hasShortTermGainPotential(stock),
   };
 }
 

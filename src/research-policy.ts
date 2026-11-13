@@ -61,12 +61,13 @@ Layman-Friendly Explanations:
 Frame all findings, reasons, and risks in clear, intuitive, layman-friendly language so that non-expert investors
 can easily understand the business reasons behind the move, what could go wrong, and what the risks are.
 
-Empirical Short-Term Price Guidance & Profit Accuracy:
-When verified short-term price movement facts or profit accuracy track records from historical bhavcopy data files
-are supplied in the prompt, treat this empirical data as ground truth. Candidates that demonstrated verified positive
-follow-through and met their profit accuracy threshold with institutional volume represent validated momentum; award
-them higher profit probability. Candidates that suffered immediate reversals, failed their profit threshold, or showed
-sharp volume drying must be downgraded to low or unsure outlook.`;
+Empirical Short-Term Price Guidance & Monthly Trend Alignment:
+1. For short-term predictions (next trading week): Refer strictly to short-term price movement facts from Milvus
+(derived directly from historical bhavcopy data files). Use proven short-term follow-through vs. breakout failures
+as empirical ground truth to guide profitProbability and assess short-term gain potential.
+2. For monthly trend profiles (30-day positional horizon): Refer to monthly facts from Milvus (institutional
+compounders, brand moats, secular tailwinds vs. cyclical down-cycles). Use this to assess whether a stock can
+sustain a multi-week trend or is at risk of operator distribution and exhaustion.`;
 
 export function isPausedMetricSearch(query: string): boolean {
   return /\b(?:P\/?E|price[- ]to[- ]earnings|market\s*cap(?:italization|italisation)?|debt\s*(?:\/|to|-to-)\s*equity|earnings[- ]growth|corporate[- ]actions?|quote\s*(?:timestamp|time)|(?:live|current|latest)\s+(?:(?:stock|share)\s+)?(?:prices?|quotes?)|(?:stock|share)\s+prices?)\b/i.test(query);

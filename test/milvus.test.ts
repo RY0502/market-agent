@@ -126,3 +126,52 @@ test('MilvusService insertInsight creates new insight with fortification_count =
   assert.equal(insertData.data[0].category, 'Geopolitical');
   assert.equal(insertData.data[0].example_stocks, 'ONGC');
 });
+
+test('MilvusService supports term-based filtering for short_term and monthly facts', async () => {
+  const shortTermInsight = {
+    id: '301',
+    text: 'Stock achieved 5% gain in 3 days confirming profit threshold',
+    category: 'Short-Term Price Movement Fact',
+    term: 'short_term',
+    fortification_count: 2,
+    last_observed_date: '2026-11-10',
+    example_stocks: 'TATA',
+    score: 0.92,
+  };
+
+  const monthlyInsight = {
+    id: '302',
+    text: 'Brand moats and high institutional turnover sustain 30-day positional momentum',
+    category: 'Brand & Institutional Liquidity',
+    term: 'monthly',
+    fortification_count: 4,
+    last_observed_date: '2026-11-01',
+    example_stocks: 'TITAN',
+    score: 0.89,
+  };
+
+  const mockClient: any = {
+    hasCollection: async () => ({ value: true }),
+    loadCollectionSync: async () => {},
+    search: async () => ({
+      results: [shortTermInsight, monthlyInsight],
+    }),
+  };
+
+  const service = new MilvusService({
+    client: mockClient,
+    similarityThreshold: 0.80,
+  });
+
+  // Querying for short_term returns short-term insight
+  const st = await service.searchInsight(Array(2048).fill(0.1), 1, 0.80, 'short_term');
+  assert.ok(st);
+  assert.equal(st.id, '301');
+  assert.equal(st.term, 'short_term');
+
+  // Querying for monthly returns monthly insight
+  const mt = await service.searchInsight(Array(2048).fill(0.1), 1, 0.80, 'monthly');
+  assert.ok(mt);
+  assert.equal(mt.id, '302');
+  assert.equal(mt.term, 'monthly');
+});

@@ -265,14 +265,14 @@ Return ONLY a JSON object:
 
                 if (options.milvusService) {
                   const vector = await options.embeddings.embedQuery(observation);
-                  const matchedInsight = await options.milvusService.searchInsight(vector, 1, options.similarityThreshold);
+                  const matchedInsight = await options.milvusService.searchInsight(vector, 1, options.similarityThreshold, 'monthly');
 
                   if (matchedInsight) {
-                    await options.milvusService.fortifyInsight(matchedInsight, symbol, options.currentDate, observation, vector);
+                    await options.milvusService.fortifyInsight(matchedInsight, symbol, options.currentDate, observation, vector, 'monthly');
                     itemResult.fortified = true;
                     fortifiedCount++;
                   } else {
-                    await options.milvusService.insertInsight(vector, observation, category, options.currentDate, symbol);
+                    await options.milvusService.insertInsight(vector, observation, category, options.currentDate, symbol, 'monthly');
                     itemResult.inserted = true;
                     insertedCount++;
                   }
@@ -315,14 +315,14 @@ Return ONLY a JSON object:
 
               if (options.milvusService) {
                 const vector = await options.embeddings.embedQuery(shortTermFact);
-                const matchedInsight = await options.milvusService.searchInsight(vector, 1, options.similarityThreshold);
+                const matchedInsight = await options.milvusService.searchInsight(vector, 1, options.similarityThreshold, 'short_term');
 
                 if (matchedInsight) {
-                  await options.milvusService.fortifyInsight(matchedInsight, symbol, options.currentDate, shortTermFact, vector);
+                  await options.milvusService.fortifyInsight(matchedInsight, symbol, options.currentDate, shortTermFact, vector, 'short_term');
                   itemResult.fortified = true;
                   fortifiedCount++;
                 } else {
-                  await options.milvusService.insertInsight(vector, shortTermFact, category, options.currentDate, symbol);
+                  await options.milvusService.insertInsight(vector, shortTermFact, category, options.currentDate, symbol, 'short_term');
                   itemResult.inserted = true;
                   insertedCount++;
                 }

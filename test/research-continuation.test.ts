@@ -95,7 +95,7 @@ test('a job publishes all top 25 gainers despite a real worker timeout, provider
       assert.equal(row.price, 500);
       assert.equal(row.change, 200);
       assert.equal(row.change_percent, 62.5);
-      assert.deepEqual(Object.keys(row).sort(), ['change', 'change_percent', 'insight_fortified', 'name', 'price', 'profit_probability', 'report_url', 'updated_at']);
+      assert.deepEqual(Object.keys(row).sort(), ['change', 'change_percent', 'name', 'price', 'profit_probability', 'report_url', 'short_term_gain_potential', 'updated_at']);
       assert.equal(row.report_url, reportReference(String(row.name), job.id).url);
     }
     assert.deepEqual(inserted[0]!.slice(0, 6).map(row => row.profit_probability), Array(6).fill(null));

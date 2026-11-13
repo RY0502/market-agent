@@ -43,6 +43,8 @@ export interface Candidate {
   observations: number;
   insightFortified?: number;
   insightText?: string;
+  shortTermGuidance?: string;
+  monthlyGuidance?: string;
 }
 
 export interface PricePoint {

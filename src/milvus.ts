@@ -9,6 +9,7 @@ export interface MarketInsight {
   example_stocks: string;
   vector?: number[];
   score?: number;
+  term?: 'short_term' | 'monthly' | string;
 }
 
 export interface MilvusServiceConfig {
@@ -74,20 +75,44 @@ export class MilvusService {
     }
   }
 
-  async searchInsight(embedding: number[], topK = 1, threshold = this.similarityThreshold): Promise<MarketInsight | null> {
+  async searchInsight(
+    embedding: number[],
+    topK = 1,
+    threshold = this.similarityThreshold,
+    term?: 'short_term' | 'monthly',
+  ): Promise<MarketInsight | null> {
     try {
       await this.initialize();
+      const limit = term ? Math.max(topK, 5) : topK;
       const searchRes = await this.client.search({
         collection_name: this.collectionName,
         data: [embedding],
-        limit: topK,
-        output_fields: ['id', 'vector', 'text', 'category', 'fortification_count', 'last_observed_date', 'example_stocks'],
+        limit,
+        output_fields: ['id', 'vector', 'text', 'category', 'fortification_count', 'last_observed_date', 'example_stocks', 'term'],
         consistency_level: ConsistencyLevelEnum.Strong,
       });
 
       const results = searchRes.results;
       if (!results || results.length === 0) return null;
-      const top = Array.isArray(results[0]) ? results[0][0] : results[0];
+      const rawList: any[] = Array.isArray(results[0]) ? results[0] : results;
+      if (!rawList.length) return null;
+
+      // Filter by term if requested
+      let candidateMatches = rawList;
+      if (term) {
+        candidateMatches = rawList.filter(item => {
+          const itemTerm = item.term;
+          const cat = String(item.category || '').toLowerCase();
+          if (term === 'short_term') {
+            return itemTerm === 'short_term' || cat.includes('short-term') || cat.includes('price movement');
+          } else {
+            return itemTerm === 'monthly' || (!itemTerm && !cat.includes('short-term'));
+          }
+        });
+      }
+
+      if (!candidateMatches.length) return null;
+      const top = candidateMatches[0];
       if (!top || typeof top.score !== 'number') return null;
 
       if (top.score < threshold) return null;
@@ -96,6 +121,7 @@ export class MilvusService {
         id: top.id,
         text: String(top.text ?? ''),
         category: String(top.category ?? 'General'),
+        term: (top.term as any) || (term ?? 'short_term'),
         fortification_count: Number(top.fortification_count ?? 1),
         last_observed_date: String(top.last_observed_date ?? ''),
         example_stocks: String(top.example_stocks ?? ''),
@@ -108,7 +134,14 @@ export class MilvusService {
     }
   }
 
-  async fortifyInsight(insight: MarketInsight, additionalStock: string, date: string, refinedText?: string, newVector?: number[]): Promise<void> {
+  async fortifyInsight(
+    insight: MarketInsight,
+    additionalStock: string,
+    date: string,
+    refinedText?: string,
+    newVector?: number[],
+    term?: 'short_term' | 'monthly',
+  ): Promise<void> {
     try {
       await this.initialize();
       const newCount = (insight.fortification_count || 1) + 1;
@@ -133,6 +166,7 @@ export class MilvusService {
           vector,
           text: refinedText || insight.text,
           category: insight.category,
+          term: term || insight.term || 'short_term',
           fortification_count: newCount,
           last_observed_date: date,
           example_stocks: updatedStocks,
@@ -141,13 +175,20 @@ export class MilvusService {
       if (typeof this.client.flushSync === 'function') {
         await this.client.flushSync({ collection_names: [this.collectionName] });
       }
-      console.log(`[Milvus] Fortified insight id=${insight.id} (count=${newCount}) with stock ${additionalStock}`);
+      console.log(`[Milvus] Fortified ${term || insight.term || 'insight'} id=${insight.id} (count=${newCount}) with stock ${additionalStock}`);
     } catch (err) {
       console.warn('[Milvus] Fortify insight failed:', err);
     }
   }
 
-  async insertInsight(embedding: number[], text: string, category: string, date: string, symbol: string): Promise<void> {
+  async insertInsight(
+    embedding: number[],
+    text: string,
+    category: string,
+    date: string,
+    symbol: string,
+    term: 'short_term' | 'monthly' = 'short_term',
+  ): Promise<void> {
     try {
       await this.initialize();
       await this.client.insert({
@@ -156,6 +197,7 @@ export class MilvusService {
           vector: embedding,
           text,
           category,
+          term,
           fortification_count: 1,
           last_observed_date: date,
           example_stocks: symbol,
@@ -164,7 +206,7 @@ export class MilvusService {
       if (typeof this.client.flushSync === 'function') {
         await this.client.flushSync({ collection_names: [this.collectionName] });
       }
-      console.log(`[Milvus] Inserted new insight for ${symbol}: "${text.slice(0, 60)}..."`);
+      console.log(`[Milvus] Inserted new ${term} insight for ${symbol}: "${text.slice(0, 60)}..."`);
     } catch (err) {
       console.warn('[Milvus] Insert insight failed:', err);
     }
