@@ -26,6 +26,12 @@ export function loadConfig() {
     SUPABASE_URL: z.string().url(),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
     NEON_DATABASE_URL: z.string().min(1),
+    MILVUS_URI: z.string().optional(),
+    MILVUS_ADDRESS: z.string().optional(),
+    MILVUS_TOKEN: z.string().optional(),
+    MILVUS_COLLECTION_NAME: z.string().default('market_insights'),
+    PROFIT_ACCURACY_THRESHOLD_PCT: z.coerce.number().default(2.0),
+    MILVUS_SIMILARITY_THRESHOLD: z.coerce.number().default(0.82),
   }).parse(process.env);
   return { ...env, ...loadReportConfig(), DATA_DIR: path.resolve(env.DATA_DIR) };
 }

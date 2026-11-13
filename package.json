@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "main": "dist/src/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -20,12 +22,14 @@
     "reports:purge": "tsx src/purge-reports.ts"
   },
   "dependencies": {
+    "@freetier/orchestrator": "github:RY0502/freetier-orchestrator#c57d603741a9369c87d9672d2d94a9a9e679ebd7",
     "@langchain/core": "^1.0.0",
     "@supabase/supabase-js": "^2.57.0",
+    "@zilliz/milvus2-sdk-node": "^3.0.6",
     "csv-parse": "^6.1.0",
     "dotenv": "^16.4.0",
     "fflate": "^0.8.2",
-    "freetier-deepagent-framework": "github:RY0502/freetier-deepagent-framework#86ec4a5576570e82064d62141e809c10df2894f8",
+    "freetier-deepagent-framework": "github:RY0502/freetier-deepagent-framework#ca8b0dd1b60488ecf9d1a7540c05dba04ae8f680",
     "zod": "^3.23.0"
   },
   "devDependencies": {

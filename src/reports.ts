@@ -353,6 +353,8 @@ export function renderStockReport(
   const gain = fiveDayGain(ordered);
   const rankDisplay = stock.totalPassing ? `${stock.rank} of ${stock.totalPassing}` : `${stock.rank}`;
   const fundamentalGuide = financialContextGuide(stock, reasoning);
+  const fortified = candidate.insightFortified ?? (assessment as any)?.insightFortified ?? 0;
+  const insightText = candidate.insightText ?? (assessment as any)?.insightText;
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
@@ -368,7 +370,7 @@ svg{display:block;width:100%;height:auto;max-width:720px;margin:auto}svg text{fo
 table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #e5eaf0;white-space:nowrap}.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 header,section,footer{overflow-wrap:anywhere}footer{padding:0 8px 20px}
 </style></head><body><main>
-<header><span class="badge">${escape(candidate.group)}</span> <span class="badge">Rank #${escape(rankDisplay)}</span><h1>${escape(candidate.symbol)}</h1><p>${escape(candidate.name)}</p>
+<header><span class="badge">${escape(candidate.group)}</span> <span class="badge">Rank #${escape(rankDisplay)}</span>${fortified > 0 ? ` <span class="badge" style="background:#e6fcf5;color:#0ca678;border:1px solid #20c997;font-weight:600">Insight Backed (Fortified: ${escape(String(fortified))}x)</span>` : ''}<h1>${escape(candidate.symbol)}</h1><p>${escape(candidate.name)}</p>
 <div class="cards"><div class="card">Screen rank<span class="value">#${escape(rankDisplay)}</span><span class="muted">${stock.totalPassing ? `Top ${stock.rank} of ${stock.totalPassing} passing` : 'Rank among screened'}</span></div>
 <div class="card">Bhavcopy close<span class="value">${money(candidate.price)}</span><span class="muted">As of ${escape(candidate.asOfDate)}</span></div>
 <div class="card">Next-week outlook<span class="value">${escape(category)}</span></div>
@@ -388,6 +390,7 @@ ${highTable(ordered.slice(-5))}</section>` : ''}
 ${section('Investment outlook', reasoning.classificationReason)}
 ${list('Supporting considerations', reasoning.reasons)}${list('Business and investment risks', reasoning.risks)}
 ${list('Potential catalysts', reasoning.catalysts)}${section('Market context', reasoning.marketContext)}
+${fortified > 0 && insightText ? `<section><h2>Market Insight &amp; Historical Pattern</h2><p><strong>Fortified ${escape(String(fortified))}x:</strong> ${escape(insightText)}</p><p class="muted">This observation was derived from historical prediction performance and verified across prior market runs.</p></section>` : ''}
 ${reasoning.metrics.length || adjustedPe != null ? `<section><h2>Available financial context</h2><p class="muted">Dated reported figures${!nse && assessment.financialPeriod ? `: ${escape(assessment.financialPeriod.slice(0, 100))}` : ''}; not live financial statements. Historical values may not reflect the analysis date's valuation.</p><div class="cards">${reasoning.metrics.map(metric =>
     `<div class="card">${metric.label}<span class="value">${escape(number(metric.value))}</span>${metric.asOf ? `<span class="muted">${metric.retrieved ? `${metric.retrieved} retrieved` : metric.historical ? 'Historical context' : 'As of'}: ${escape(metric.asOf)}</span>` : ''}</div>`).join('')}
 ${adjustedPe != null && adjustedPeDate ? `<div class="card">Adjusted P/E (distinct NSE figure)<span class="value">${escape(number(adjustedPe))}</span><span class="muted">${adjustedPeDate < candidate.asOfDate ? 'Historical context' : 'As of'}: ${escape(adjustedPeDate)}</span></div>` : ''}</div>${fundamentalGuide}</section>` : (fundamentalGuide ? `<section><h2>Financial fundamentals guide</h2>${fundamentalGuide}</section>` : '')}

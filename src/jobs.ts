@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { BhavStore, MissingBhavcopy, UnavailableHistory, screen, shortlist, type Candidate } from './bhav.js';
+import { BhavStore, MissingBhavcopy, UnavailableHistory, screen, shortlist, type Candidate, type Equity } from './bhav.js';
 import { dateValue, todayIST } from './dates.js';
 import { atomicWrite, cleanupRun, initializeStorage, prune, readOptional } from './storage.js';
 import { selectStocks, refreshClassification, type RankedStock, type Researcher, type ResearchWarning } from './research.js';
@@ -54,6 +54,7 @@ export interface JobDependencies {
   screeningConfig?: () => ScreeningConfig;
   resetFrameworkState: () => Promise<void>;
   enrich?: (stocks: RankedStock[], runId: string) => Promise<void>;
+  evaluatePredictions?: (job: Job, currentEquities?: Equity[]) => Promise<void>;
 }
 
 export class Jobs {
@@ -245,6 +246,15 @@ export class Jobs {
           outcome.isin === stock.candidate.isin && outcome.group === stock.candidate.group);
         if (outcome) outcome.report = stock.report;
         await this.save(job);
+      }
+      if (this.deps.evaluatePredictions) {
+        job.phase = 'evaluating_predictions';
+        await this.save(job);
+        try {
+          await this.deps.evaluatePredictions(job, history.current);
+        } catch (error) {
+          console.warn('[Jobs] Error during evaluatePredictions:', error);
+        }
       }
       job.status = 'publishing';
       job.phase = 'publishing';

@@ -40,6 +40,8 @@ export interface Candidate {
   averageTurnover: number;
   volatility: number;
   observations: number;
+  insightFortified?: number;
+  insightText?: string;
 }
 
 export interface PricePoint {

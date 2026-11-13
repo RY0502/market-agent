@@ -7,6 +7,9 @@ import { resetFrameworkState } from './neon.js';
 import { createReporter, purgeReportStorage, verifyReportHosting } from './report-storage.js';
 import { todayIST } from './dates.js';
 import { enrichStocks } from './tradingview.js';
+import { evaluatePreviousRun } from './prediction-accuracy.js';
+import { createMilvusService } from './milvus.js';
+import { BhavStore } from './bhav.js';
 
 export interface RunAgentOptions {
   date?: string;
@@ -26,6 +29,24 @@ export async function runAgent(options: RunAgentOptions = {}): Promise<Job> {
     publish: createPublisher(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, config.DATA_DIR),
     report: createReporter(config),
     purgeReports: () => purgeReportStorage(config).then(() => {}),
+    evaluatePredictions: async (job, currentEquities) => {
+      try {
+        const milvus = createMilvusService();
+        await evaluatePreviousRun({
+          supabaseUrl: config.SUPABASE_URL,
+          supabaseKey: config.SUPABASE_SERVICE_ROLE_KEY,
+          bhavStore: new BhavStore(config.DATA_DIR),
+          currentDate: job.date,
+          currentEquities,
+          currentRunStartedAt: job.createdAt,
+          thresholdPct: config.PROFIT_ACCURACY_THRESHOLD_PCT,
+          similarityThreshold: config.MILVUS_SIMILARITY_THRESHOLD,
+          milvusService: milvus,
+        });
+      } catch (err) {
+        console.warn('[Agent] Prediction evaluation warning:', err);
+      }
+    },
   });
   await jobs.initialize();
   const date = options.date ?? process.argv[2] ?? todayIST();

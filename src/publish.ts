@@ -18,6 +18,7 @@ export function publicationRow(stock: RankedStock, updatedAt: string) {
     updated_at: updatedAt,
     profit_probability: stock.research.assessment.profitProbability,
     report_url: report.url,
+    insight_fortified: stock.candidate.insightFortified ?? (stock.research.assessment as any).insightFortified ?? 0,
   };
 }
 
@@ -83,8 +84,8 @@ export function createPublisher(url: string, key: string, root: string, request:
           countResponse, countError ? 'Empty error response' : 'Missing or invalid exact row count',
         )}`);
       }
-      if (count > 100) {
-        const excess = count - 100;
+      if (count > 150) {
+        const excess = count - 150;
         const oldestResponse = await client.from(table).select('id')
             .order('updated_at', { ascending: true, nullsFirst: true }).order('id', { ascending: true }).limit(excess);
         const { data, error } = oldestResponse;

@@ -8,7 +8,7 @@ import { initializeStorage } from '../src/storage.js';
 import { candidate, research, reportReference } from './helpers.js';
 
 const stock = () => ({ candidate: candidate(), research: research(), riskScore: 20, recoveryScore: 80, rank: 1, report: reportReference() });
-const displayKeys = ['change', 'change_percent', 'name', 'price', 'profit_probability', 'report_url', 'updated_at'];
+const displayKeys = ['change', 'change_percent', 'insight_fortified', 'name', 'price', 'profit_probability', 'report_url', 'updated_at'];
 
 test('missing, expired or non-HTTPS report references prevent all Supabase operations', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'report-publish-'));
@@ -51,7 +51,7 @@ test('publication payload rounds change_percent to 2 decimal places maximum for 
   assert.equal(publicationRow(integerDecimal, '2026-10-27T12:00:00Z').change_percent, 25);
 });
 
-for (const [gainers, losers] of [[99, 99], [100, 99], [99, 100], [101, 126]]) {
+for (const [gainers, losers] of [[149, 149], [150, 149], [149, 150], [151, 176]]) {
   test(`direct publication prunes gainers and leaves paused losers untouched (${gainers}/${losers})`, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'nse-direct-'));
     try {
@@ -79,12 +79,12 @@ for (const [gainers, losers] of [[99, 99], [100, 99], [99, 100], [101, 126]]) {
         }
         if (method === 'GET') {
           assert.equal(url.searchParams.get('order'), 'updated_at.asc.nullsfirst,id.asc');
-          const expectedLimit = counts[table]! - 100;
+          const expectedLimit = counts[table]! - 150;
           assert.equal(url.searchParams.get('limit'), String(expectedLimit));
           return Response.json(Array.from({ length: expectedLimit }, (_, i) => ({ id: i + 1 })));
         }
         if (method === 'DELETE') {
-          const expectedDelete = counts[table]! - 100;
+          const expectedDelete = counts[table]! - 150;
           assert.equal(url.searchParams.get('id'), `in.(${Array.from({ length: expectedDelete }, (_, i) => i + 1).join(',')})`);
           deleted.push(table);
           counts[table]! -= expectedDelete;
@@ -95,9 +95,9 @@ for (const [gainers, losers] of [[99, 99], [100, 99], [99, 100], [101, 126]]) {
       const publish = createPublisher('https://example.supabase.co', 'test-key', root, request);
       await publish({ gainers: Array.from({ length: 25 }, stock), losers: Array.from({ length: 25 }, stock) }, 'run');
       assert.deepEqual(deleted, Object.entries({ top_gainers: gainers! })
-        .filter(([, count]) => count + 25 > 100).map(([table]) => table));
+        .filter(([, count]) => count + 25 > 150).map(([table]) => table));
       assert.deepEqual(inserted, ['top_gainers']);
-      assert.equal(counts.top_gainers, Math.min(100, gainers! + 25));
+      assert.equal(counts.top_gainers, Math.min(150, gainers! + 25));
       assert.equal(counts.top_losers, losers!);
       const progress = JSON.parse(await readFile(publicationFile(root, 'run'), 'utf8'));
       assert.equal(progress.tables.top_losers.phase, 'paused');

@@ -123,3 +123,43 @@ export function createExaSearch(
     throw new Error(lastFailure);
   };
 }
+
+export async function queryExaNews(
+  query: string,
+  config = loadExaConfig(),
+  request: typeof fetch = fetch,
+  now: () => number = Date.now,
+): Promise<{ title?: string; url: string; text: string }[]> {
+  if (!config.enabled || !config.keys.length) return [];
+  const deadline = now() + config.EXA_TIMEOUT_MS;
+  for (let attempt = 0; attempt < Math.min(config.keys.length, config.EXA_MAX_KEY_ATTEMPTS); attempt++) {
+    const key = config.keys[attempt % config.keys.length]!;
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    try {
+      const response = await request('https://api.exa.ai/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+        body: JSON.stringify({
+          query,
+          type: 'auto',
+          numResults: 3,
+          contents: { text: { maxCharacters: 4000 }, highlights: { maxCharacters: 1000 } },
+        }),
+        signal: AbortSignal.timeout(remaining),
+      });
+      if (!response.ok) continue;
+      const raw = await response.text();
+      const parsed = responseSchema.safeParse(JSON.parse(raw));
+      if (!parsed.success) continue;
+      return parsed.data.results.map(r => ({
+        title: r.title ?? undefined,
+        url: r.url,
+        text: (r.text?.trim() || r.highlights?.join('\n').trim() || '').slice(0, 4000),
+      })).filter(r => r.text.length > 20);
+    } catch {
+      continue;
+    }
+  }
+  return [];
+}

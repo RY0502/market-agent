@@ -2,9 +2,10 @@ import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
 import type { Serialized } from '@langchain/core/load/serializable';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import { DatabaseClient, DeepAgentRunner, FilesystemBackend, type AgentMiddleware } from 'freetier-deepagent-framework';
+import { DatabaseClient, DeepAgentRunner, FilesystemBackend, FreeTierEmbeddings, type AgentMiddleware } from 'freetier-deepagent-framework';
 import { z } from 'zod';
 import { shortlist, type Candidate } from './bhav.js';
+import { createMilvusService } from './milvus.js';
 import { ResearchDiagnostics, researchConcurrencySchema, researchLimitsSchema, retryResearchNetwork, type ResearchLimits } from './research-control.js';
 import { runResearchProcess } from './research-process.js';
 import { normalizeQuoteTimestamp } from './quote-time.js';
@@ -55,6 +56,8 @@ export const assessmentSchema = z.object({
   marketContext: z.string().min(20),
   marketEvidence: sourceSchema.nullable().describe('Evidence object {url, excerpt} or null; never a string'),
   sources: z.array(sourceSchema).max(20),
+  insightFortified: z.number().int().optional(),
+  insightText: z.string().optional(),
 });
 export type Assessment = z.infer<typeof assessmentSchema>;
 
@@ -63,6 +66,8 @@ const evidenceId = () => z.string().min(1).describe('Exact evidenceId returned b
 const flatMetric = z.number().finite().nullable().describe('A JSON number or null if unknown. All citations are best effort; uncited figures are explicitly unverified.');
 export const submissionSchema = assessmentSchema.omit({
   warnings: true,
+  insightFortified: true,
+  insightText: true,
   livePrice: true, pe: true, sectorPe: true, marketCapCrore: true, debtToEquity: true,
   earningsGrowthPercent: true, corporateActionEvidence: true, marketEvidence: true, sources: true,
 }).extend({
@@ -698,7 +703,23 @@ export type Researcher = (candidate: Candidate, cached?: CachedResearchContext) 
 export function createResearcher(root: string, runId: string): Researcher {
   const limits = researchLimitsSchema.parse(process.env);
   const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js';
+  const milvus = createMilvusService();
   return async (candidate, cached) => {
+    if (milvus && !candidate.insightFortified) {
+      try {
+        const emb = new FreeTierEmbeddings();
+        const queryText = `${candidate.name} ${candidate.symbol} ${candidate.group === 'gainers' ? 'rally momentum positive earnings contract acquisition' : 'selling pressure risk decline'} market catalyst`;
+        const vec = await emb.embedQuery(queryText);
+        const match = await milvus.searchInsight(vec);
+        if (match) {
+          candidate.insightFortified = match.fortification_count;
+          candidate.insightText = match.text;
+          console.log(`[Research] Candidate ${candidate.symbol} matched fortified insight (${match.fortification_count}x): "${match.text.slice(0, 70)}..."`);
+        }
+      } catch (err) {
+        console.warn(`[Research] Milvus lookup warning for ${candidate.symbol}:`, err);
+      }
+    }
     console.log(JSON.stringify({
       event: 'research_started', runId, symbol: candidate.symbol,
       mode: cached ? 'cached_refresh' : 'full_research', limits,
@@ -873,13 +894,19 @@ Candidate: ${JSON.stringify(candidate)}
 Prior assessment: ${JSON.stringify(prior.assessment)}
 Previously captured evidence (including Tavily, Exa and any TradingView extraction): ${JSON.stringify(evidence.catalog().map(read =>
   read.cachedAt ? { ...read, content: qualitativeCachedText(read.content) } : read))}
+${candidate.insightFortified && candidate.insightText ? `\nHISTORICAL PATTERN & FORTIFIED INSIGHT (${candidate.insightFortified}x fortified): "${candidate.insightText}". Factor this verified historical pattern into your assessment and risks.\n` : ''}
 Reassess using only this evidence and submit the final assessment.` : `Research run ${runId}; fresh evaluation at ${new Date().toISOString()}.
 ${cached ? 'Use the constrained cache-hit refresh path; the application supplies compact context before assessment.' : ''}
 Bhavcopy screen (historical comparison, research is CURRENT not a backtest): ${JSON.stringify(candidate)}
+${candidate.insightFortified && candidate.insightText ? `\nHISTORICAL PATTERN & FORTIFIED INSIGHT (${candidate.insightFortified}x fortified): "${candidate.insightText}". Factor this verified historical pattern into your assessment and risks.\n` : ''}
 Classify the next trading week's long-investment profit outlook as low, medium, high or null
 if evidence is insufficient. Explain valuation, volume/liquidity, catalysts and downside risks.
 Call submit_stock_assessment with evidence and explicit reasons.`);
     if (!submitted) throw new Error(`Agent did not submit an assessment for ${candidate.symbol}`);
+    if (candidate.insightFortified) {
+      submitted.insightFortified = candidate.insightFortified;
+      submitted.insightText = candidate.insightText;
+    }
     return { ...prior, assessment: submitted, reads: evidence.reads, researchedAt: new Date().toISOString() };
   };
 }
