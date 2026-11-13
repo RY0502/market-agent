@@ -175,7 +175,7 @@ export class BhavStore {
   missingDates: string[] = [];
   isinMap = new Map<string, string>();
 
-  constructor(private root: string, private request: typeof fetch = fetch) {}
+  constructor(public readonly root: string, private request: typeof fetch = fetch) {}
 
   async load(date: string): Promise<Equity[]> {
     const file = path.join(this.root, 'bhav', `${date}.csv`);

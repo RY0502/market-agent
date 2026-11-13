@@ -1009,8 +1009,8 @@ export function computeSafetyRankScore(stock: RankedStock): number {
 
   // 5. Valuation Froth Penalty: P/E > 70 (The Cochin Shipyard climax top rule)
   let valuationPenalty = 0;
-  const pe = assessment.pe?.value ?? candidate.nse?.pe ?? candidate.nse?.adjustedPe;
-  if (pe && pe > 70) {
+  const peValue = assessment.pe?.value ?? candidate.nse?.pe?.value ?? candidate.nse?.adjustedPe ?? null;
+  if (peValue !== null && peValue > 70) {
     valuationPenalty = 50;
   }
 
