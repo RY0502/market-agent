@@ -4,9 +4,9 @@ import path from 'node:path';
 import { BhavStore, MissingBhavcopy, UnavailableHistory, screen, shortlist, type Candidate, type Equity } from './bhav.js';
 import { dateValue, todayIST } from './dates.js';
 import { atomicWrite, cleanupRun, initializeStorage, prune, readOptional } from './storage.js';
-import { selectStocks, refreshClassification, type RankedStock, type Researcher, type ResearchWarning } from './research.js';
+import { selectStocks, refreshClassification, rankStocks, type RankedStock, type Researcher, type ResearchWarning } from './research.js';
 import type { Publisher } from './publish.js';
-import { loadScreeningConfig, type ScreeningConfig } from './screening.js';
+import { ACTIVE_GROUPS, loadScreeningConfig, type ScreeningConfig } from './screening.js';
 import { withResearchCache } from './research-cache.js';
 import type { Reporter, ReportReference } from './reports.js';
 import type { ResearchResult } from './research.js';
@@ -207,10 +207,15 @@ export class Jobs {
       for (const stock of [...results.gainers, ...results.losers]) {
         refreshClassification(stock, Date.now(), job.id);
       }
+      results.gainers = rankStocks(results.gainers);
+      if (ACTIVE_GROUPS.includes('losers')) {
+        results.losers = rankStocks(results.losers);
+      }
       for (const outcome of job.stockOutcomes) {
         const stock = [...results.gainers, ...results.losers].find(stock =>
           stock.candidate.isin === outcome.isin && stock.candidate.group === outcome.group);
         if (stock) {
+          outcome.rank = stock.rank;
           outcome.profitProbability = stock.research.assessment.profitProbability;
           outcome.classificationReason = stock.research.assessment.classificationReason;
           outcome.dataGapReason = stock.research.assessment.dataGapReason;

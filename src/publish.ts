@@ -5,6 +5,8 @@ import type { RankedStock } from './research.js';
 import { atomicWrite, readOptional } from './storage.js';
 import { ACTIVE_GROUPS } from './screening.js';
 
+export const MAX_HISTORY_ROWS = 750;
+
 export function publicationRow(stock: RankedStock, updatedAt: string) {
   const report = z.object({ url: z.string().url(), expiresAt: z.string().datetime() }).parse(stock.report);
   if (new URL(report.url).protocol !== 'https:' || Date.parse(report.expiresAt) <= Date.parse(updatedAt)) {
@@ -84,8 +86,8 @@ export function createPublisher(url: string, key: string, root: string, request:
           countResponse, countError ? 'Empty error response' : 'Missing or invalid exact row count',
         )}`);
       }
-      if (count > 150) {
-        const excess = count - 150;
+      if (count > MAX_HISTORY_ROWS) {
+        const excess = count - MAX_HISTORY_ROWS;
         const oldestResponse = await client.from(table).select('id')
             .order('updated_at', { ascending: true, nullsFirst: true }).order('id', { ascending: true }).limit(excess);
         const { data, error } = oldestResponse;

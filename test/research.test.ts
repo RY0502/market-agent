@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assessmentSchema, LiveEvidence, refreshClassification, selectStocks, validateAssessment } from '../src/research.js';
+import { assessmentSchema, computeSafetyRankScore, LiveEvidence, rankStocks, refreshClassification, selectStocks, validateAssessment } from '../src/research.js';
 import { shortlist } from '../src/bhav.js';
 import { ACTIVE_GROUPS } from '../src/screening.js';
 import { publicationRow } from '../src/publish.js';
@@ -222,4 +222,43 @@ test('a stock with no verified live metrics is retained with a null category and
   assert.equal(result.gainers[0]!.riskScore, null);
   assert.equal(result.gainers[0]!.recoveryScore, null);
   assert.ok(result.gainers[0]!.research.assessment.dataGapReason);
+});
+
+test('rankStocks ranks safer options with high profit probability above low-probability speculative gains', () => {
+  // Stock A: 80% gain, but low profit probability, high risk, frothy P/E > 70
+  const stockA = {
+    candidate: candidate({ symbol: 'SPECPUMP', changePercent: 80, averageTurnover: 20_000_000 }),
+    research: research('SPECPUMP', { profitProbability: 'low', pe: { value: 95 } as any, fundamentalRisk: 80 }),
+    riskScore: 80,
+    recoveryScore: 20,
+    rank: 1,
+  };
+
+  // Stock B: 15% gain, but high profit probability, low risk, 50 Cr daily turnover, fortified insight
+  const stockB = {
+    candidate: candidate({ symbol: 'SAFEBRAND', changePercent: 15, averageTurnover: 500_000_000, insightFortified: 2 }),
+    research: research('SAFEBRAND', { profitProbability: 'high', pe: { value: 22 } as any, fundamentalRisk: 15 }),
+    riskScore: 15,
+    recoveryScore: 85,
+    rank: 2,
+  };
+
+  // Stock C: 25% gain, medium profit probability, moderate risk
+  const stockC = {
+    candidate: candidate({ symbol: 'MODERATE', changePercent: 25, averageTurnover: 100_000_000 }),
+    research: research('MODERATE', { profitProbability: 'medium', pe: { value: 30 } as any, fundamentalRisk: 40 }),
+    riskScore: 40,
+    recoveryScore: 60,
+    rank: 3,
+  };
+
+  const ranked = rankStocks([stockA, stockB, stockC]);
+  // SAFEBRAND should be Rank 1 (safer + high probability + brand turnover)
+  // MODERATE should be Rank 2
+  // SPECPUMP should be Rank 3 (lowest probability + frothy valuation)
+  assert.equal(stockB.rank, 1);
+  assert.equal(stockC.rank, 2);
+  assert.equal(stockA.rank, 3);
+  assert.ok(computeSafetyRankScore(stockB) > computeSafetyRankScore(stockC));
+  assert.ok(computeSafetyRankScore(stockC) > computeSafetyRankScore(stockA));
 });

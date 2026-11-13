@@ -194,6 +194,30 @@ test('screening env validates values and both range bounds', () => {
   assert.deepEqual(shortlist([]), { gainers: [], losers: [] });
 });
 
+test('turnover filtering excludes stocks below minimum daily turnover threshold', () => {
+  const settings = loadScreeningConfig({
+    GAINERS_MIN_TURNOVER_CR: '5',
+  });
+  assert.equal(settings.gainers.minTurnoverCr, 5);
+
+  const baseLow = equity({ date: '2026-09-25', isin: 'INE001A01001', symbol: 'LOWTURN', close: 500, high: 500, low: 480, turnover: 10_000_000 });
+  const currentLow = equity({ date: '2026-10-25', isin: 'INE001A01001', symbol: 'LOWTURN', close: 600, high: 620, low: 580, turnover: 10_000_000 });
+
+  const baseHigh = equity({ date: '2026-09-25', isin: 'INE002B01002', symbol: 'HIGHTURN', close: 500, high: 500, low: 480, turnover: 60_000_000 });
+  const currentHigh = equity({ date: '2026-10-25', isin: 'INE002B01002', symbol: 'HIGHTURN', close: 600, high: 620, low: 580, turnover: 60_000_000 });
+
+  const history = {
+    current: [currentLow, currentHigh],
+    baseline: '2026-09-25',
+    days: [[baseLow, baseHigh], [currentLow, currentHigh]],
+  };
+
+  const filtered = screen(history, settings);
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0]!.symbol, 'HIGHTURN');
+  assert.equal(filtered[0]!.averageTurnoverCr, 6);
+});
+
 test('history filters latest price only, reuses raw cache and probes weekend baseline', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'nse-bhav-'));
   try {

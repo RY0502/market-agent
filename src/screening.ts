@@ -15,6 +15,9 @@ const envSchema = z.object({
   GAINERS_MAX_PRICE: rupees.default(2000),
   LOSERS_MIN_PRICE: rupees.default(400),
   LOSERS_MAX_PRICE: rupees.default(1500),
+  GAINERS_MIN_TURNOVER_CR: z.coerce.number().finite().nonnegative().optional(),
+  LOSERS_MIN_TURNOVER_CR: z.coerce.number().finite().nonnegative().optional(),
+  MIN_DAILY_TURNOVER_CR: z.coerce.number().finite().nonnegative().optional(),
 }).superRefine((env, context) => {
   for (const group of ['GAINERS', 'LOSERS'] as const) {
     if (env[`${group}_MIN_PRICE`] > env[`${group}_MAX_PRICE`]) {
@@ -27,6 +30,7 @@ export interface ScreeningRule {
   threshold: number;
   minPrice: number;
   maxPrice: number;
+  minTurnoverCr?: number;
 }
 export interface ScreeningConfig {
   lookbackDays: number;
@@ -48,13 +52,32 @@ export function loadScreeningConfig(env?: Record<string, string | undefined>): S
     env = { ...process.env, ...file };
   }
   const parsed = envSchema.parse(env);
+  const fallbackTurnover = parsed.MIN_DAILY_TURNOVER_CR;
+  const gainersTurnover = parsed.GAINERS_MIN_TURNOVER_CR ?? fallbackTurnover;
+  const losersTurnover = parsed.LOSERS_MIN_TURNOVER_CR ?? fallbackTurnover;
   return {
     lookbackDays: parsed.LOOKBACK_DAYS,
-    gainers: { threshold: parsed.GAINERS_INCREASE_PCT, minPrice: parsed.GAINERS_MIN_PRICE, maxPrice: parsed.GAINERS_MAX_PRICE },
-    losers: { threshold: parsed.LOSERS_DECREASE_PCT, minPrice: parsed.LOSERS_MIN_PRICE, maxPrice: parsed.LOSERS_MAX_PRICE },
+    gainers: {
+      threshold: parsed.GAINERS_INCREASE_PCT,
+      minPrice: parsed.GAINERS_MIN_PRICE,
+      maxPrice: parsed.GAINERS_MAX_PRICE,
+      ...(gainersTurnover !== undefined && gainersTurnover > 0 ? { minTurnoverCr: gainersTurnover } : {}),
+    },
+    losers: {
+      threshold: parsed.LOSERS_DECREASE_PCT,
+      minPrice: parsed.LOSERS_MIN_PRICE,
+      maxPrice: parsed.LOSERS_MAX_PRICE,
+      ...(losersTurnover !== undefined && losersTurnover > 0 ? { minTurnoverCr: losersTurnover } : {}),
+    },
   };
 }
 
 export function withinPrice(price: number, rule: ScreeningRule): boolean {
   return price >= rule.minPrice && price <= rule.maxPrice;
+}
+
+export function withinTurnover(turnover: number, rule: ScreeningRule): boolean {
+  if (!rule.minTurnoverCr || rule.minTurnoverCr <= 0) return true;
+  const minTurnoverRupees = rule.minTurnoverCr * 10_000_000;
+  return turnover >= minTurnoverRupees;
 }

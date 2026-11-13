@@ -4,7 +4,7 @@ import { parse } from 'csv-parse/sync';
 import { unzipSync, strFromU8 } from 'fflate';
 import { addDays, dateValue } from './dates.js';
 import { atomicWrite, readOptional } from './storage.js';
-import { ACTIVE_GROUPS, loadScreeningConfig, SHORTLIST_SIZE, withinPrice, type ScreeningConfig } from './screening.js';
+import { ACTIVE_GROUPS, loadScreeningConfig, SHORTLIST_SIZE, withinPrice, withinTurnover, type ScreeningConfig } from './screening.js';
 import type { NseFundamentals } from './nse-fundamentals.js';
 import { calculatePriceSignals, type PriceSignals } from './price-signals.js';
 
@@ -38,6 +38,7 @@ export interface Candidate {
   averageVolume: number;
   volumeRatio: number;
   averageTurnover: number;
+  averageTurnoverCr?: number;
   volatility: number;
   observations: number;
   insightFortified?: number;
@@ -339,6 +340,7 @@ export function screen(
     for (const group of ACTIVE_GROUPS) {
       const rule = settings[group];
       if (!withinPrice(current.close, rule)) continue;
+      if (!withinTurnover(averageTurnover, rule)) continue;
       const change = group === 'gainers'
         ? (Math.round(current.high * 100) - Math.round(base.high * 100)) / 100
         : (Math.round(current.low * 100) - Math.round(base.low * 100)) / 100;
@@ -351,7 +353,9 @@ export function screen(
         change,
         changePercent,
         baselineDate: history.baseline, asOfDate: current.date,
-        averageVolume, averageTurnover, volumeRatio: current.volume / averageVolume,
+        averageVolume, averageTurnover,
+        averageTurnoverCr: Math.round((averageTurnover / 10_000_000) * 100) / 100,
+        volumeRatio: current.volume / averageVolume,
         volatility, observations: samples.length,
         priceSignals: calculatePriceSignals(samples, history.days.length, history.missingDates),
       });

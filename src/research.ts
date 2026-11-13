@@ -708,7 +708,7 @@ export function createResearcher(root: string, runId: string): Researcher {
     if (milvus && !candidate.insightFortified) {
       try {
         const emb = new FreeTierEmbeddings();
-        const queryText = `${candidate.name} ${candidate.symbol} ${candidate.group === 'gainers' ? 'rally momentum positive earnings contract acquisition' : 'selling pressure risk decline'} market catalyst`;
+        const queryText = `${candidate.name} ${candidate.symbol} ${candidate.group === 'gainers' ? 'rally momentum positive earnings contract acquisition price movement profit accuracy threshold' : 'selling pressure risk decline'} market catalyst`;
         const vec = await emb.embedQuery(queryText);
         const match = await milvus.searchInsight(vec);
         if (match) {
@@ -894,13 +894,13 @@ Candidate: ${JSON.stringify(candidate)}
 Prior assessment: ${JSON.stringify(prior.assessment)}
 Previously captured evidence (including Tavily, Exa and any TradingView extraction): ${JSON.stringify(evidence.catalog().map(read =>
   read.cachedAt ? { ...read, content: qualitativeCachedText(read.content) } : read))}
-${candidate.insightFortified && candidate.insightText ? `\nHISTORICAL PATTERN & FORTIFIED INSIGHT (${candidate.insightFortified}x fortified): "${candidate.insightText}". Factor this verified historical pattern into your assessment and risks.\n` : ''}
-Reassess using only this evidence and submit the final assessment.` : `Research run ${runId}; fresh evaluation at ${new Date().toISOString()}.
+${candidate.insightFortified && candidate.insightText ? `\nFACT GUIDANCE & HISTORICAL PATTERN (${candidate.insightFortified}x observed/fortified): "${candidate.insightText}". Factor this verified price movement fact and profit accuracy from historical data files into your assessment and risks in layman-friendly language.\n` : ''}
+Reassess using only this evidence and submit the final assessment. Factor traded liquidity, brand strength, institutional sponsorship and structural thematic tailwinds into the decision.` : `Research run ${runId}; fresh evaluation at ${new Date().toISOString()}.
 ${cached ? 'Use the constrained cache-hit refresh path; the application supplies compact context before assessment.' : ''}
 Bhavcopy screen (historical comparison, research is CURRENT not a backtest): ${JSON.stringify(candidate)}
-${candidate.insightFortified && candidate.insightText ? `\nHISTORICAL PATTERN & FORTIFIED INSIGHT (${candidate.insightFortified}x fortified): "${candidate.insightText}". Factor this verified historical pattern into your assessment and risks.\n` : ''}
+${candidate.insightFortified && candidate.insightText ? `\nFACT GUIDANCE & HISTORICAL PATTERN (${candidate.insightFortified}x observed/fortified): "${candidate.insightText}". Factor this verified price movement fact and profit accuracy from historical data files into your assessment and risks in layman-friendly language.\n` : ''}
 Classify the next trading week's long-investment profit outlook as low, medium, high or null
-if evidence is insufficient. Explain valuation, volume/liquidity, catalysts and downside risks.
+if evidence is insufficient. Assess traded liquidity (turnover: INR ${(candidate.averageTurnover / 10_000_000).toFixed(2)} Cr), brand mindshare, institutional backing vs. speculative operator risk, catalysts and downside risks. Explain your reasoning in simple layman terms.
 Call submit_stock_assessment with evidence and explicit reasons.`);
     if (!submitted) throw new Error(`Agent did not submit an assessment for ${candidate.symbol}`);
     if (candidate.insightFortified) {
@@ -949,6 +949,78 @@ export function refreshClassification(stock: RankedStock, now = Date.now(), runI
       event: 'assessment_warning', runId, symbol: stock.candidate.symbol, group: stock.candidate.group, ...warning,
     }));
   }
+}
+
+/** Compute a safety and profit probability score for ranking shortlisted stocks. */
+export function computeSafetyRankScore(stock: RankedStock): number {
+  const assessment = stock.research.assessment;
+  const candidate = stock.candidate;
+
+  // 1. Likelihood of Profit / Increase (Dominant tier)
+  let probabilityScore = 0;
+  if (assessment.profitProbability === 'high') {
+    probabilityScore = 400;
+  } else if (assessment.profitProbability === 'medium') {
+    probabilityScore = 250;
+  } else if (assessment.profitProbability === null) {
+    // Unsure / unclassified
+    probabilityScore = 100;
+  } else {
+    // 'low'
+    probabilityScore = 0;
+  }
+
+  // 2. Fortified Insight / Short-Term Fact Guidance from Milvus
+  const fortified = candidate.insightFortified ?? (assessment as any)?.insightFortified ?? 0;
+  const insightBonus = Math.min(100, fortified * 25);
+
+  // 3. Safety: Fundamental & Volatility Risk (Lower risk is safer)
+  const risk = stock.riskScore ?? assessment.fundamentalRisk ?? 50;
+  const safetyScore = (100 - risk) * 1.5;
+
+  // 4. Traded Liquidity / Brand Moat: Average Daily Turnover in Cr
+  const turnoverCr = candidate.averageTurnoverCr ?? (candidate.averageTurnover / 10_000_000);
+  const turnoverBonus = Math.min(60, turnoverCr * 3);
+
+  // 5. Valuation Froth Penalty: P/E > 70 (The Cochin Shipyard climax top rule)
+  let valuationPenalty = 0;
+  const pe = assessment.pe?.value ?? candidate.nse?.pe ?? candidate.nse?.adjustedPe;
+  if (pe && pe > 70) {
+    valuationPenalty = 50;
+  }
+
+  return probabilityScore + insightBonus + safetyScore + turnoverBonus - valuationPenalty;
+}
+
+/**
+ * Re-rank researched stocks based on verified safety, brand/liquidity, and likelihood to increase
+ * rather than simply the single-day percentage gain.
+ */
+export function rankStocks(stocks: RankedStock[]): RankedStock[] {
+  const scored = stocks.map((stock, originalIndex) => ({
+    stock,
+    originalIndex,
+    score: computeSafetyRankScore(stock),
+  }));
+
+  scored.sort((a, b) => {
+    // Primary: safety & profit probability score
+    if (Math.abs(b.score - a.score) > 0.01) {
+      return b.score - a.score;
+    }
+    // Secondary tie-breaker: percentage movement (original screen gain)
+    if (Math.abs(b.stock.candidate.changePercent - a.stock.candidate.changePercent) > 0.001) {
+      return b.stock.candidate.changePercent - a.stock.candidate.changePercent;
+    }
+    // Tertiary tie-breaker: symbol alphabetical
+    return a.stock.candidate.symbol.localeCompare(b.stock.candidate.symbol);
+  });
+
+  scored.forEach((item, index) => {
+    item.stock.rank = index + 1;
+  });
+
+  return stocks;
 }
 
 export async function selectStocks(

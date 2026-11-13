@@ -26,7 +26,7 @@ export function reportReasoning(stock: RankedStock) {
     !/^(?:Background research from .* is reused;|Only bhavcopy pricing is available after this research failure:|Business\/news research failed;|Research could not be completed for this stock:|Unsure: research did not complete successfully|Unsure: no usable research evidence was captured)/.test(text) &&
     !/^(?:Available research is insufficient for a supported outlook|Current quote and corporate actions remain unverified|Current market context could not be independently verified)\.?$/.test(text) &&
     !/(?:unusable model field|unusable decision fields|missing or unusable decision fields|model submission|correction round|evidenceIds\.|retained usable fields without|No captured research evidence)/i.test(text);
-  const texts = (items: string[]) => [...new Set(items.filter(useful))].slice(0, 8).map(text => text.slice(0, 900));
+  const texts = (items: string[]) => [...new Set(items.filter(useful))].slice(0, 4).map(text => text.slice(0, 600));
   const fields = [
     ['pe', 'P/E'], ['sectorPe', 'Sector P/E'], ['marketCapCrore', 'Market cap (INR crore)'],
     ['debtToEquity', 'Debt / equity'], ['earningsGrowthPercent', 'Earnings growth (%)'],
@@ -228,26 +228,26 @@ function financialContextGuide(stock: RankedStock, reasoning: ReturnType<typeof 
   const items: string[] = [];
 
   if (mentionsPe) {
-    items.push(`<li><strong>P/E (Price-to-Earnings) Ratio:</strong> Measures how much investors pay per &#8377;1 of reported annual company earnings for the stated period.
-      Compare only matching earnings periods and accounting bases in similar businesses. A high or low ratio alone does not establish cheapness, safety or next-week returns. Missing P/E does not prove losses.</li>`);
+    items.push(`<li><strong>P/E (Price-to-Earnings) Ratio:</strong> <em>In plain terms:</em> How many rupees investors pay for every ₹1 of profit the company makes per year. A lower P/E (e.g. 15–25) means the stock is cheaper or fairly valued. A very high P/E (>60–75) means the stock is expensive and priced for perfection—leaving little room for disappointment.</li>`);
   }
 
   if (mentionsValuation) {
-    items.push(`<li><strong>Valuation &amp; Overvaluation:</strong> Price must be assessed against comparable business earnings, assets and expectations. This report does not establish a fair value or margin of safety merely from P/E.</li>`);
+    items.push(`<li><strong>Valuation &amp; Overvaluation:</strong> <em>In plain terms:</em> Stock prices should ideally track company earnings. When a stock price shoots up purely on hype or operator buying without actual profit growth, it becomes 'overvalued' and vulnerable to sharp drops.</li>`);
   }
 
   if (mentionsMcap) {
-    items.push(`<li><strong>Market Capitalization (Company Size):</strong> Total market value of outstanding shares in INR crore. It measures size, not how cheap a share is. Size alone does not establish balance-sheet strength, trading liquidity, low volatility or safety.</li>`);
+    items.push(`<li><strong>Market Capitalization (Company Size):</strong> <em>In plain terms:</em> The total worth of the company in the stock market. Large-cap companies (huge brands) are usually safer, more liquid, and steadier; small-cap companies can grow rapidly but carry higher risk of sharp swings.</li>`);
   }
 
   if (mentionsDebt) {
-    items.push(`<li><strong>Debt-to-Equity (D/E):</strong> Compares borrowing with shareholders' equity. Interpretation depends on industry, cash flows and accounting basis; no universal cutoff establishes safety. This metric is currently paused.</li>`);
+    items.push(`<li><strong>Debt-to-Equity (D/E):</strong> <em>In plain terms:</em> How much borrowed debt the company owes compared to its net worth. Low or zero debt means the company is financially safe even during hard economic times.</li>`);
   }
 
   if (!items.length) return '';
 
   return `<div style="margin-top:16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px">
 <div class="muted" style="font-weight:650;color:#334155;margin-bottom:8px">Understanding these fundamentals (investor guide):</div>
+<p style="font-size:13px;color:#64748b;margin:0 0 10px">A simple, layman-friendly guide to key financial metrics mentioned in this report:</p>
 <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:#475569">${items.join('')}</ul>
 </div>`;
 }
@@ -279,7 +279,11 @@ export function decisionBrief(stock: RankedStock, now = Date.now()) {
 function renderDecisionBrief(stock: RankedStock, now: number): string {
   const brief = decisionBrief(stock, now);
   const reasoning = reportReasoning(stock);
-  const outlook = { high: 'Favourable case', medium: 'Mixed case', low: 'Weak upside / downside concerns' };
+  const outlook = {
+    high: 'Favourable case (High chance to rise: strong business catalysts and healthy trading volume)',
+    medium: 'Mixed case (Moderate upside: balanced catalysts and risks)',
+    low: 'Weak upside / downside concerns (Elevated risk: weak fundamentals or stretched price)',
+  };
   const category = stock.research.assessment.profitProbability;
   const item = (label: string, text: string) => `<p><strong>${label}:</strong> ${escape(text)}</p>`;
   const pe = reasoning.metrics.find(metric => metric.field === 'pe' && metric.value > 0);
@@ -294,14 +298,14 @@ function renderDecisionBrief(stock: RankedStock, now: number): string {
   return `<section><h2>Decision brief</h2>
 ${item('Next-week outlook', category ? outlook[category] : 'Unsure')}
 ${item('Evidence confidence', `${brief.quality.confidence}. ${brief.quality.freshSources} distinct cited recent business sources across ${brief.quality.freshDomains} domains. This is coverage, not an accuracy score or a guarantee of independent reporting.`)}
-${item('What happened', brief.whatHappened)}
-${item('Why it matters', brief.whyItMatters)}
-${item('What supports the view', brief.support.join(' ') || 'No supported business explanation is available.')}
-${item('What could go wrong', brief.risks.join(' ') || 'Downside risk could not be assessed; this is not evidence of low risk.')}
-${pe ? item('P/E in everyday terms', `Investors paid about Rs ${number(pe.value)} per Rs 1 of reported annual earnings on this basis.${pe.asOf ? ` ${pe.historical ? 'Last available historical NSE observation' : pe.retrieved ? `${pe.retrieved} retrieved (not the financial reporting date)` : 'Observation date'}: ${pe.asOf}.` : ''} This is not a payback promise or proof that the share is cheap.`)
+${item('What happened (Recent Price Movement)', brief.whatHappened)}
+${item('Why it matters (What this means for an investor)', brief.whyItMatters)}
+${item('What supports the view (Growth drivers & catalysts)', brief.support.join(' ') || 'No supported business explanation is available.')}
+${item('What could go wrong (Key risks to watch)', brief.risks.join(' ') || 'Downside risk could not be assessed; this is not evidence of low risk.')}
+${pe ? item('P/E in everyday terms', `Investors paid about Rs ${number(pe.value)} per Rs 1 of reported annual earnings on this basis.${pe.asOf ? ` ${pe.historical ? 'Last available historical NSE observation' : pe.retrieved ? `${pe.retrieved} retrieved (not the financial reporting date)` : 'Observation date'}: ${pe.asOf}.` : ''} A lower number often suggests better value, while high numbers mean the market expects rapid growth. This is not a payback promise or proof that the share is cheap.`)
     : meaningful ? item('P/E limitation', 'The captured TradingView page displays negative TTM earnings per share. A conventional positive P/E comparison is not meaningful on that basis; other periods may differ.')
       : item('P/E limitation', 'A usable ratio is unavailable. That does not establish whether the company is profitable or loss-making.')}
-${cap ? item('Company size', `Reported market cap: Rs ${number(cap.value)} crore${cap.asOf ? ` (${cap.historical ? 'historical observation' : cap.retrieved ? 'page retrieved' : 'as of'} ${cap.asOf})` : ''}. This measures company size, not cheapness or safety.`) : ''}
+${cap ? item('Company size', `Reported market cap: Rs ${number(cap.value)} crore${cap.asOf ? ` (${cap.historical ? 'historical observation' : cap.retrieved ? 'page retrieved' : 'as of'} ${cap.asOf})` : ''}. Large companies tend to be more stable; small companies can fluctuate more wildly.`) : ''}
 ${item('What is missing or uncertain', [...new Set(gaps)].join(' ') || 'No additional coverage gaps were identified; uncertainty and investment risk remain.')}
 ${item('What would change the view', brief.changes.join(' '))}
 <p class="muted">Outlook is the model's interpretation, evidence confidence describes support, and downside risk describes possible losses. They are different concepts. No benchmark-relative performance comparison is supplied.</p></section>`;
@@ -322,8 +326,25 @@ function reportSources(stock: RankedStock): string {
       if (!read || seen.has(key)) return [];
       seen.add(key);
       return [`<li><a href="${escape(source.url)}" rel="noopener noreferrer">${escape(url.hostname)}</a>${read.publishedAt ? `; published ${escape(read.publishedAt)}` : '; publication date not established'}; retrieved ${escape(read.observedAt)}${read.cachedAt ? '; reused dated background' : ''}</li>`];
-    }).slice(0, 20);
+    }).slice(0, 5);
   return sources.length ? `<section><h2>Captured sources</h2><ul>${sources.join('')}</ul><p class="muted">Source presence is not independent verification. Publication dates differ from retrieval dates.</p></section>` : '';
+}
+
+function laymanQuickTake(stock: RankedStock): string {
+  const prob = stock.research.assessment.profitProbability;
+  const turnoverCr = stock.candidate.averageTurnoverCr ?? (stock.candidate.averageTurnover / 10_000_000);
+  const isLiquid = turnoverCr >= 10;
+  const fortified = stock.candidate.insightFortified ?? (stock.research.assessment as any)?.insightFortified ?? 0;
+
+  if (prob === 'high') {
+    return `<strong>Promising &amp; Safer Setup:</strong> This stock combines verified positive business catalysts with ${isLiquid ? 'high daily trading turnover (strong brand &amp; institutional presence)' : 'adequate liquidity'}, indicating a safer opportunity with high likelihood of positive follow-through next week.${fortified > 0 ? ` Fortified by ${fortified}x verified historical pattern.` : ''}`;
+  } else if (prob === 'medium') {
+    return `<strong>Moderate / Balanced Setup:</strong> Positive momentum is present, but potential upside is balanced by market risks or valuation factors. Moderate potential for next week.`;
+  } else if (prob === 'low') {
+    return `<strong>Caution / High Downside Risk:</strong> Despite recent price rises, underlying business fundamentals or stretched valuation suggest weak upside and high risk of price correction.`;
+  } else {
+    return `<strong>Inconclusive / Wait for Data:</strong> Research could not verify enough reliable current business disclosures to determine next week's direction with confidence.`;
+  }
 }
 
 /** Render the public stock report without the detailed P/E history table. */
@@ -374,7 +395,9 @@ header,section,footer{overflow-wrap:anywhere}footer{padding:0 8px 20px}
 <div class="cards"><div class="card">Screen rank<span class="value">#${escape(rankDisplay)}</span><span class="muted">${stock.totalPassing ? `Top ${stock.rank} of ${stock.totalPassing} passing` : 'Rank among screened'}</span></div>
 <div class="card">Bhavcopy close<span class="value">${money(candidate.price)}</span><span class="muted">As of ${escape(candidate.asOfDate)}</span></div>
 <div class="card">Next-week outlook<span class="value">${escape(category)}</span></div>
-<div class="card">Screen-period change<span class="value">${money(candidate.change)}</span>${escape(number(candidate.changePercent))}% (${escape(candidate.baselineDate)} to ${escape(candidate.asOfDate)})<span class="muted" style="display:block;margin-top:2px">${candidate.group === 'gainers' ? 'Gain between high to highs in the period' : 'Movement between low to lows in the period'}</span></div></div>
+<div class="card">Screen-period change<span class="value">${money(candidate.change)}</span>${escape(number(candidate.changePercent))}% (${escape(candidate.baselineDate)} to ${escape(candidate.asOfDate)})<span class="muted" style="display:block;margin-top:2px">${candidate.group === 'gainers' ? 'Gain between high to highs in the period' : 'Movement between low to lows in the period'}</span></div>
+<div class="card">Avg daily turnover<span class="value">${candidate.averageTurnoverCr ? `&#8377;${number(candidate.averageTurnoverCr)} Cr` : money(candidate.averageTurnover)}</span><span class="muted">${candidate.averageTurnoverCr && candidate.averageTurnoverCr >= 10 ? 'High Liquidity (Brand / Institutional)' : candidate.averageTurnoverCr && candidate.averageTurnoverCr >= 5 ? 'Adequate Liquidity' : 'Low / Speculative Float'}</span></div>
+<div class="card">Monthly trend profile<span class="value" style="font-size:18px">${candidate.averageTurnoverCr && candidate.averageTurnoverCr >= 10 ? 'Institutional Trend' : 'Momentum Swing'}</span><span class="muted">30-day positional horizon</span></div></div>
 <p class="muted">Rank by past price movement, not safety, evidence confidence or expected return. An intraday high-to-high comparison is not a realised investment return.</p>
 <p class="badge">${escape(cacheText)}</p>${cache?.backgroundResearchedAt ? `<p class="muted">Background researched: ${escape(cache.backgroundResearchedAt)}</p>` : ''}
 <p class="muted">Assessment recorded: ${escape(stock.research.researchedAt)}</p>${stock.research.failure
@@ -382,6 +405,10 @@ header,section,footer{overflow-wrap:anywhere}footer{padding:0 8px 20px}
       ? '<p>Initial research was unavailable; review the assessment and its limitations carefully.</p>'
       : '<p>Research was unavailable for this assessment. No investment outlook was produced.</p>'
     : ''}</header>
+${!stock.research.failure ? `<section style="background:#f8fafc;border-left:4px solid #3b82f6;padding:14px 18px;margin-bottom:16px;border-radius:8px">
+<div style="font-weight:700;color:#1e3a8a;margin-bottom:4px">Layman Summary for Everyday Investors:</div>
+<p style="margin:0;font-size:14px;color:#334155;line-height:1.5">${laymanQuickTake(stock)}</p>
+</section>` : ''}
 ${renderDecisionBrief(stock, Date.parse(createdAt))}
 <section><h2>Recent price performance</h2><p class="muted">Daily NSE bhavcopy closing prices, not intraday/live quotes. Prices are unadjusted for corporate actions. The closing-price graph is separate from the endpoint high-to-high screening calculation.</p>${priceChart(ordered, requestedPoints)}
 ${priceTable(ordered, gain)}</section>

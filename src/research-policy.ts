@@ -38,7 +38,35 @@ companies when matching captured earnings evidence establishes that. Do not aver
 figures: distinguish TTM/annual, consolidated/standalone, dates, currency and units.
 Keep outlook, evidence confidence and downside risks distinct. In reasons explain what actually
 supports the view; in risks explain reversal scenarios; in recoveryCatalysts explain observable
-developments that would change the view, without inventing target prices or events.`;
+developments that would change the view, without inventing target prices or events.
+
+Differentiate between established brand/thematic compounders and obscure, low-liquidity speculative stocks.
+Stocks with high daily turnover (> INR 10-25 Cr), prominent brand recognition, or verified institutional
+backing (DII/FII) frequently digest short-term gains through tight consolidations or healthy pullbacks
+before resuming their multi-week trend; do not mistake orderly consolidation in structural brand leaders
+for trend failure. Conversely, lesser-known, low-turnover (< INR 5 Cr), or obscure microcaps that have
+surged over the lookback window are frequently in late-stage operator distribution or liquidity exhaustion.
+Without verified institutional sponsorship or transformative structural business fundamentals, price surges
+in low-liquidity obscure stocks are high-risk bull traps that mean-revert downward; rate them low profit
+probability or null (Unsure) and highlight illiquidity and distribution risks.
+Assess whether the company rides durable secular macro tailwinds (e.g., Defence capex supercycle,
+EV/green transition, digital royalty/IP moats with ROCE > 25% and low leverage) versus cyclical/commodity/
+working-capital-intensive businesses (e.g., seasonal agrochemicals, commoditized raw materials). Structural
+leaders have high trend resilience; cyclical commodity stocks without structural margin expansion face rapid
+multiple contraction. Use candidate.priceSignals to distinguish orderly accumulation (high spike gain retained,
+steady volume ratio, shallow drawdown) from climax/blow-off tops (isolated parabolic volume spike followed by
+drying turnover and immediate give-back).
+
+Layman-Friendly Explanations:
+Frame all findings, reasons, and risks in clear, intuitive, layman-friendly language so that non-expert investors
+can easily understand the business reasons behind the move, what could go wrong, and what the risks are.
+
+Empirical Short-Term Price Guidance & Profit Accuracy:
+When verified short-term price movement facts or profit accuracy track records from historical bhavcopy data files
+are supplied in the prompt, treat this empirical data as ground truth. Candidates that demonstrated verified positive
+follow-through and met their profit accuracy threshold with institutional volume represent validated momentum; award
+them higher profit probability. Candidates that suffered immediate reversals, failed their profit threshold, or showed
+sharp volume drying must be downgraded to low or unsure outlook.`;
 
 export function isPausedMetricSearch(query: string): boolean {
   return /\b(?:P\/?E|price[- ]to[- ]earnings|market\s*cap(?:italization|italisation)?|debt\s*(?:\/|to|-to-)\s*equity|earnings[- ]growth|corporate[- ]actions?|quote\s*(?:timestamp|time)|(?:live|current|latest)\s+(?:(?:stock|share)\s+)?(?:prices?|quotes?)|(?:stock|share)\s+prices?)\b/i.test(query);
