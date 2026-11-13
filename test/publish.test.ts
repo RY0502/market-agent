@@ -38,6 +38,36 @@ test('publication payload contains only display columns, never reasons or metada
   const lowStock = { ...stock(), research: research('EXAMPLE', { profitProbability: 'low' }) };
   assert.equal(publicationRow(lowStock, '2026-10-27T12:00:00Z').short_term_gain_potential, false);
 
+  const frothStock = {
+    ...stock(),
+    research: research('EXAMPLE', { pe: { value: 85, source: { url: 'https://example.org', excerpt: 'PE 85' } } }),
+  };
+  assert.equal(publicationRow(frothStock, '2026-10-27T12:00:00Z').short_term_gain_potential, false);
+
+  const medLowRiskHighTurnover = {
+    ...stock(),
+    research: research('EXAMPLE', { profitProbability: 'medium' }),
+    riskScore: 35,
+    candidate: { ...stock().candidate, averageTurnover: 60_000_000 },
+  };
+  assert.equal(publicationRow(medLowRiskHighTurnover, '2026-10-27T12:00:00Z').short_term_gain_potential, true);
+
+  const medHighRisk = {
+    ...stock(),
+    research: research('EXAMPLE', { profitProbability: 'medium' }),
+    riskScore: 48,
+    candidate: { ...stock().candidate, averageTurnover: 60_000_000 },
+  };
+  assert.equal(publicationRow(medHighRisk, '2026-10-27T12:00:00Z').short_term_gain_potential, false);
+
+  const medIlliquid = {
+    ...stock(),
+    research: research('EXAMPLE', { profitProbability: 'medium' }),
+    riskScore: 30,
+    candidate: { ...stock().candidate, averageTurnover: 20_000_000 }, // 2 Cr < 5 Cr
+  };
+  assert.equal(publicationRow(medIlliquid, '2026-10-27T12:00:00Z').short_term_gain_potential, false);
+
   const loserStock = { ...stock(), candidate: { ...stock().candidate, group: 'losers' as const } };
   assert.equal(publicationRow(loserStock, '2026-10-27T12:00:00Z').short_term_gain_potential, false);
 });

@@ -9,12 +9,27 @@ export const MAX_HISTORY_ROWS = 750;
 
 export function hasShortTermGainPotential(stock: RankedStock): boolean {
   if (stock.candidate.group !== 'gainers') return false;
-  const prob = stock.research.assessment.profitProbability;
-  if (prob === 'high') return true;
-  if (prob === 'medium') {
-    const risk = stock.riskScore ?? stock.research.assessment.fundamentalRisk;
-    return risk === null || risk <= 50;
+  const assessment = stock.research.assessment;
+  const prob = assessment.profitProbability;
+  if (!prob) return false;
+
+  const risk = stock.riskScore ?? assessment.fundamentalRisk;
+  const peValue = assessment.pe?.value ?? stock.candidate.nse?.pe?.value ?? stock.candidate.nse?.adjustedPe ?? null;
+  const turnoverCr = stock.candidate.averageTurnoverCr ?? (stock.candidate.averageTurnover / 10_000_000);
+
+  // Valuation froth check (P/E > 70 is penalized/rejected for safe short-term gain)
+  if (peValue !== null && peValue > 70) return false;
+
+  // 1. High conviction: 'high' profit probability with reasonable fundamental & volatility risk (<= 50)
+  if (prob === 'high') {
+    return risk !== null && risk <= 50;
   }
+
+  // 2. Medium conviction: 'medium' profit probability requires low risk (<= 40) AND healthy liquidity (turnover >= 5 Cr)
+  if (prob === 'medium') {
+    return risk !== null && risk <= 40 && turnoverCr >= 5;
+  }
+
   return false;
 }
 
