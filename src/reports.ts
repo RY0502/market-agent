@@ -201,55 +201,8 @@ function highTable(prices: PricePoint[]): string {
 </div></div>`;
 }
 
-function financialContextGuide(stock: RankedStock, reasoning: ReturnType<typeof reportReasoning>): string {
-  const nse = stock.candidate.nse;
-  const adjustedPe = nse?.adjustedPe;
-  const assessment = stock.research.assessment;
-
-  const allTexts = [
-    assessment.classificationReason,
-    ...(assessment.reasons ?? []),
-    ...(assessment.risks ?? []),
-    ...(assessment.recoveryCatalysts ?? []),
-    assessment.marketContext,
-  ].filter(Boolean).join(' ');
-
-  const hasPeMetric = reasoning.metrics.some(m => /p\/e/i.test(m.label)) || adjustedPe != null;
-  const mentionsPe = hasPeMetric || /\bp\/?e\b|price[- ]to[- ]earnings/i.test(allTexts);
-
-  const hasMcapMetric = reasoning.metrics.some(m => /market cap/i.test(m.label));
-  const mentionsMcap = hasMcapMetric || /market cap|capitalization|large[- ]cap|mid[- ]cap|small[- ]cap/i.test(allTexts);
-
-  const mentionsValuation = mentionsPe || /valu(?:ation|ed)|overvalued|undervalued|expensive multiple|premium multiple/i.test(allTexts);
-
-  const hasDebtMetric = reasoning.metrics.some(m => /debt/i.test(m.label));
-  const mentionsDebt = hasDebtMetric || /debt[- ]to[- ]equity|leverage|indebtedness/i.test(allTexts);
-
-  const items: string[] = [];
-
-  if (mentionsPe) {
-    items.push(`<li><strong>P/E (Price-to-Earnings) Ratio:</strong> <em>In plain terms:</em> How many rupees investors pay for every ₹1 of profit the company makes per year. A lower P/E (e.g. 15–25) means the stock is cheaper or fairly valued. A very high P/E (>60–75) means the stock is expensive and priced for perfection—leaving little room for disappointment.</li>`);
-  }
-
-  if (mentionsValuation) {
-    items.push(`<li><strong>Valuation &amp; Overvaluation:</strong> <em>In plain terms:</em> Stock prices should ideally track company earnings. When a stock price shoots up purely on hype or operator buying without actual profit growth, it becomes 'overvalued' and vulnerable to sharp drops.</li>`);
-  }
-
-  if (mentionsMcap) {
-    items.push(`<li><strong>Market Capitalization (Company Size):</strong> <em>In plain terms:</em> The total worth of the company in the stock market. Large-cap companies (huge brands) are usually safer, more liquid, and steadier; small-cap companies can grow rapidly but carry higher risk of sharp swings.</li>`);
-  }
-
-  if (mentionsDebt) {
-    items.push(`<li><strong>Debt-to-Equity (D/E):</strong> <em>In plain terms:</em> How much borrowed debt the company owes compared to its net worth. Low or zero debt means the company is financially safe even during hard economic times.</li>`);
-  }
-
-  if (!items.length) return '';
-
-  return `<div style="margin-top:16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px">
-<div class="muted" style="font-weight:650;color:#334155;margin-bottom:8px">Understanding these fundamentals (investor guide):</div>
-<p style="font-size:13px;color:#64748b;margin:0 0 10px">A simple, layman-friendly guide to key financial metrics mentioned in this report:</p>
-<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:#475569">${items.join('')}</ul>
-</div>`;
+function financialContextGuide(_stock: RankedStock, _reasoning: ReturnType<typeof reportReasoning>): string {
+  return '';
 }
 
 export function decisionBrief(stock: RankedStock, now = Date.now()) {
@@ -373,7 +326,6 @@ export function renderStockReport(
   const adjustedPeDate = nse?.adjustedPe != null ? nse.asOf : nse?.historical?.adjustedPe?.asOf;
   const gain = fiveDayGain(ordered);
   const rankDisplay = stock.totalPassing ? `${stock.rank} of ${stock.totalPassing}` : `${stock.rank}`;
-  const fundamentalGuide = financialContextGuide(stock, reasoning);
   const fortified = candidate.insightFortified ?? (assessment as any)?.insightFortified ?? 0;
   const insightText = candidate.insightText ?? (assessment as any)?.insightText;
   const html = `<!doctype html>
@@ -420,11 +372,10 @@ ${list('Potential catalysts', reasoning.catalysts)}${section('Market context', r
 ${fortified > 0 && insightText ? `<section><h2>Market Insight &amp; Historical Pattern</h2><p><strong>Fortified ${escape(String(fortified))}x:</strong> ${escape(insightText)}</p><p class="muted">This observation was derived from historical prediction performance and verified across prior market runs.</p></section>` : ''}
 ${reasoning.metrics.length || adjustedPe != null ? `<section><h2>Available financial context</h2><p class="muted">Dated reported figures${!nse && assessment.financialPeriod ? `: ${escape(assessment.financialPeriod.slice(0, 100))}` : ''}; not live financial statements. Historical values may not reflect the analysis date's valuation.</p><div class="cards">${reasoning.metrics.map(metric =>
     `<div class="card">${metric.label}<span class="value">${escape(number(metric.value))}</span>${metric.asOf ? `<span class="muted">${metric.retrieved ? `${metric.retrieved} retrieved` : metric.historical ? 'Historical context' : 'As of'}: ${escape(metric.asOf)}</span>` : ''}</div>`).join('')}
-${adjustedPe != null && adjustedPeDate ? `<div class="card">Adjusted P/E (distinct NSE figure)<span class="value">${escape(number(adjustedPe))}</span><span class="muted">${adjustedPeDate < candidate.asOfDate ? 'Historical context' : 'As of'}: ${escape(adjustedPeDate)}</span></div>` : ''}</div>${fundamentalGuide}</section>` : (fundamentalGuide ? `<section><h2>Financial fundamentals guide</h2>${fundamentalGuide}</section>` : '')}
+${adjustedPe != null && adjustedPeDate ? `<div class="card">Adjusted P/E (distinct NSE figure)<span class="value">${escape(number(adjustedPe))}</span><span class="muted">${adjustedPeDate < candidate.asOfDate ? 'Historical context' : 'As of'}: ${escape(adjustedPeDate)}</span></div>` : ''}</div></section>` : ''}
 ${nse?.corporateActions.length ? list('NSE corporate-action notices', nse.corporateActions.map(action =>
     `${action.purpose}; ${action.exDate ? `ex-date ${action.exDate}` : `record/book date ${action.recordDate ?? action.bookStart ?? 'not supplied'}`}; reported ${action.reportedOn}`)) : ''}
-${reportSources(stock)}
-<footer><p>Qualitative research, not a calibrated probability or guarantee of returns. Review source filings and current market information before investing. Technical extraction diagnostics are retained in the run audit, not displayed here.</p>
+<footer>
 <p>Run: ${escape(runId)}<br>Report created: ${escape(createdAt)}<br>Report expires: ${escape(expiresAt)}. Hosted access ends at expiry and Cloudflare KV automatically removes the stored report. Downloaded copies cannot be recalled.</p></footer>
 </main></body></html>`;
   if (Buffer.byteLength(html, 'utf8') > 64_000) throw new Error('Stock report exceeds its 64 KB size limit');

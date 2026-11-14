@@ -210,36 +210,10 @@ test('screen-period change card mentions gain between high to highs in period fo
   assert.match(loserHtml, /Movement between low to lows in the period/);
 });
 
-test('report includes fundamental guidance when P/E, valuation or market cap is present and excludes unmentioned fundamentals', () => {
+test('report excludes investor guide, captured sources and boilerplate qualitative disclaimer', () => {
   const item = stock();
-  item.research.assessment.marketCapCrore = null;
-  item.research.assessment.debtToEquity = null;
-  item.research.assessment.pe = { value: 25, source: { url: 'https://example.com', excerpt: 'PE 25' } };
-  const html = render(item);
-  assert.match(html, /Understanding these fundamentals \(investor guide\)/);
-  assert.match(html, /P\/E \(Price-to-Earnings\) Ratio/);
-  assert.match(html, /Valuation &amp; Overvaluation/);
-  // Market cap not mentioned in metrics or text
-  assert.doesNotMatch(html, /Market Capitalization \(Company Size\)/);
-
-  // Add market cap
-  item.research.assessment.marketCapCrore = { value: 5000, source: { url: 'https://example.com', excerpt: 'Market cap 5000' } };
-  const htmlWithMcap = render(item);
-  assert.match(htmlWithMcap, /Market Capitalization \(Company Size\)/);
-});
-
-test('fundamental guide is excluded when no financial fundamentals are present in metrics or narrative', () => {
-  const item = stock();
-  item.research.assessment.pe = null;
-  item.research.assessment.sectorPe = null;
-  item.research.assessment.marketCapCrore = null;
-  item.research.assessment.debtToEquity = null;
-  item.research.assessment.earningsGrowthPercent = null;
-  item.research.assessment.classificationReason = 'Company with stable revenue model and regular operations.';
-  item.research.assessment.reasons = ['Consistent operating margins', 'Strong distribution reach'];
-  item.research.assessment.risks = ['Raw material price increases'];
-  item.research.assessment.recoveryCatalysts = ['Capacity addition'];
-  item.research.assessment.marketContext = 'General manufacturing benchmark context.';
   const html = render(item);
   assert.doesNotMatch(html, /Understanding these fundamentals \(investor guide\)/);
+  assert.doesNotMatch(html, /<h2>Captured sources<\/h2>/);
+  assert.doesNotMatch(html, /Qualitative research, not a calibrated probability or guarantee of returns/);
 });
