@@ -72,7 +72,8 @@ export class Jobs {
     for (const file of await readdir(path.join(this.deps.root, 'runs'))) {
       if (!/^\d{4}-\d{2}-\d{2}\.[a-f0-9-]{36}\.json$/.test(file)) continue;
       const contents = await readOptional(path.join(this.deps.root, 'runs', file));
-      const job = JSON.parse(contents!.toString()) as Job;
+      if (!contents) continue;
+      const job = JSON.parse(contents.toString()) as Job;
       if (['queued', 'running', 'publishing'].includes(job.status)) {
         job.status = 'failed';
         job.error = 'Process interrupted. If phase was publishing, inspect disk publication progress and reconcile Supabase rows before retrying; an insert may already have committed.';

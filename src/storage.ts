@@ -20,7 +20,12 @@ export async function readOptional(file: string): Promise<Buffer | undefined> {
   try {
     return await readFile(file);
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
+    if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'EACCES')) {
+      if (error.code === 'EACCES') {
+        console.warn(`Permission denied reading optional file: ${file}; skipping.`);
+      }
+      return undefined;
+    }
     throw error;
   }
 }
